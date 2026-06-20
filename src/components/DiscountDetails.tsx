@@ -5,6 +5,7 @@ import { formatCurrency } from '../services/transactionService';
 interface DiscountDetailsProps {
   details: DiscountDetail[];
   baseAmount: number;
+  originalBaseAmount?: number;
   crossSiteFee: number;
   finalAmount: number;
   quotaDiscount?: number;
@@ -14,6 +15,7 @@ interface DiscountDetailsProps {
 export const DiscountDetails = ({
   details,
   baseAmount,
+  originalBaseAmount,
   crossSiteFee,
   finalAmount,
   quotaDiscount = 0,
@@ -46,15 +48,15 @@ export const DiscountDetails = ({
   const quotaDiscountFromDetails = details.find(d => d.type === 'quota')?.amount || quotaDiscount;
   const totalDiscount = quotaDiscountFromDetails + couponDiscount + promotionDiscount;
 
-  const originalBaseAmount = baseAmount + quotaDiscountFromDetails;
-  const totalBeforeDiscount = originalBaseAmount + crossSiteFee;
+  const displayOriginalBase = originalBaseAmount != null ? originalBaseAmount : baseAmount + quotaDiscountFromDetails;
+  const totalBeforeDiscount = displayOriginalBase + crossSiteFee;
   const calculatedFinalAmount = Math.max(0, totalBeforeDiscount - totalDiscount);
 
   return (
     <div className="space-y-3">
       <div className="flex justify-between text-sm">
         <span className="text-gray-500">基础费用</span>
-        <span className="font-medium">{formatCurrency(originalBaseAmount)}</span>
+        <span className="font-medium">{formatCurrency(displayOriginalBase)}</span>
       </div>
 
       {crossSiteFee > 0 && (
@@ -164,7 +166,7 @@ export const DiscountDetails = ({
       </div>
 
       <div className="text-xs text-gray-400 text-center">
-        计算公式: {formatCurrency(originalBaseAmount)} + {formatCurrency(crossSiteFee)} - {formatCurrency(totalDiscount)} = {formatCurrency(calculatedFinalAmount)}
+        计算公式: {formatCurrency(displayOriginalBase)} + {formatCurrency(crossSiteFee)} - {formatCurrency(totalDiscount)} = {formatCurrency(calculatedFinalAmount)}
       </div>
 
       {totalBeforeDiscount > 0 && finalAmount === 0 && (

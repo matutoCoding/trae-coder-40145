@@ -13,6 +13,7 @@ import {
   Site,
   QuotaUsageRecord,
   CalculationResult,
+  QuotaPlan,
 } from '../types';
 import {
   mockUser,
@@ -34,13 +35,14 @@ import {
   calculateRentalDuration,
   calculateCrossSiteReturn,
 } from '../services/discountService';
-import { useQuota, checkAndResetQuotaIfNeeded } from '../services/quotaService';
+import { useQuota, checkAndResetQuotaIfNeeded, getCurrentPlan, switchQuotaPlan as switchPlan, DEFAULT_QUOTA_PLANS } from '../services/quotaService';
 import { generateBill, payBill, refundBill } from '../services/billService';
 import { createRechargeTransaction, formatCurrency } from '../services/transactionService';
 
 interface AppState {
   user: User;
   userQuota: UserQuota;
+  quotaPlans: QuotaPlan[];
   coupons: Coupon[];
   promotions: DiscountPromotion[];
   discountConfig: DiscountConfig;
@@ -80,6 +82,7 @@ interface AppState {
 
   updateMonthlyQuota: (newQuota: number) => void;
   resetQuotaManually: () => void;
+  switchQuotaPlan: (planId: string) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -87,6 +90,7 @@ export const useStore = create<AppState>()(
     (set, get) => ({
       user: mockUser,
       userQuota: mockUserQuota,
+      quotaPlans: DEFAULT_QUOTA_PLANS,
       coupons: mockCoupons,
       promotions: mockPromotions,
       discountConfig: mockDiscountConfig,
@@ -263,7 +267,8 @@ export const useStore = create<AppState>()(
           state.promotions,
           state.discountConfig,
           state.pricingRule,
-          state.currentRental.quotaUsed
+          state.currentRental.quotaUsed,
+          getCurrentPlan(state.userQuota).perUseDeductionCap
         );
 
         const updatedRental: RentalRecord = {
@@ -376,7 +381,8 @@ export const useStore = create<AppState>()(
           state.promotions,
           state.discountConfig,
           state.pricingRule,
-          useQuota
+          useQuota,
+          getCurrentPlan(state.userQuota).perUseDeductionCap
         );
       },
 
@@ -389,7 +395,8 @@ export const useStore = create<AppState>()(
           state.promotions,
           state.discountConfig,
           state.pricingRule,
-          useQuota
+          useQuota,
+          getCurrentPlan(state.userQuota).perUseDeductionCap
         );
       },
 
@@ -467,6 +474,11 @@ export const useStore = create<AppState>()(
             usedQuota: 0,
             lastResetDate: new Date().toISOString().split('T')[0],
           },
+        })),
+
+      switchQuotaPlan: (planId) =>
+        set(state => ({
+          userQuota: switchPlan(state.userQuota, planId),
         })),
     }),
     {

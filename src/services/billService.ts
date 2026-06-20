@@ -22,6 +22,7 @@ export const generateBill = (
     rentalId: rental.id,
     userId: rental.userId,
     baseAmount: calculationResult.baseAmount,
+    originalBaseAmount: calculationResult.originalBaseAmount,
     crossSiteFee: calculationResult.crossSiteFee,
     quotaDiscount: Math.round(quotaDiscount * 100) / 100,
     couponDiscount: calculationResult.couponDiscount,

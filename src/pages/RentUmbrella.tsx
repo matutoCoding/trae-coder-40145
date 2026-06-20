@@ -68,8 +68,8 @@ export const RentUmbrella = () => {
 
   const previewResult = useMemo(() => {
     if (!selectedBorrowSite || !selectedReturnSite) return null;
-    return previewCharges(previewDuration, selectedBorrowSite, selectedReturnSite);
-  }, [previewDuration, selectedBorrowSite, selectedReturnSite, selectedCoupon]);
+    return previewCharges(previewDuration, selectedBorrowSite, selectedReturnSite, useQuota && canUseQuota ? 1 : 0);
+  }, [previewDuration, selectedBorrowSite, selectedReturnSite, selectedCoupon, useQuota, canUseQuota]);
 
   const availableCoupons = useMemo(() => {
     return coupons.filter((c) => c.isActive && new Date(c.validTo) > new Date());
@@ -203,7 +203,8 @@ export const RentUmbrella = () => {
                     previewCharges(
                       elapsedTime,
                       currentRental.borrowSiteId,
-                      currentRental.borrowSiteId
+                      currentRental.borrowSiteId,
+                      currentRental.quotaUsed
                     ).finalAmount
                   )}
                 </p>
@@ -330,8 +331,11 @@ export const RentUmbrella = () => {
                   <DiscountDetails
                     details={previewResult.details}
                     baseAmount={previewResult.baseAmount}
+                    originalBaseAmount={previewResult.originalBaseAmount}
                     crossSiteFee={previewResult.crossSiteFee}
                     finalAmount={previewResult.finalAmount}
+                    quotaUsed={previewResult.quotaUsed}
+                    quotaDiscount={previewResult.details.find(d => d.type === 'quota')?.amount}
                   />
                 )}
               </div>
@@ -457,7 +461,7 @@ export const RentUmbrella = () => {
                       {selectedCoupon.type === 'fixed'
                         ? `立减¥${selectedCoupon.value}`
                         : selectedCoupon.type === 'percentage'
-                        ? `${selectedCoupon.value}折优惠`
+                        ? `${(100 - selectedCoupon.value) / 10}折优惠`
                         : `免费${selectedCoupon.value}小时`}
                     </p>
                   </div>
@@ -519,7 +523,7 @@ export const RentUmbrella = () => {
                         {coupon.type === 'fixed'
                           ? `¥${coupon.value}`
                           : coupon.type === 'percentage'
-                          ? `${coupon.value}折`
+                          ? `${(100 - coupon.value) / 10}折`
                           : `${coupon.value}h`}
                       </p>
                     </div>

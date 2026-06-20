@@ -438,7 +438,7 @@ export const Dashboard = () => {
                     {coupon.type === 'fixed'
                       ? `¥${coupon.value}`
                       : coupon.type === 'percentage'
-                      ? `${coupon.value}折`
+                      ? `${(100 - coupon.value) / 10}折`
                       : `免费${coupon.value}小时`}
                   </p>
                   <p className="text-sm font-medium mt-2">{coupon.name}</p>

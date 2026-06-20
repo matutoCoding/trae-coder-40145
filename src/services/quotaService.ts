@@ -1,9 +1,63 @@
-import { UserQuota, QuotaUsageRecord } from '../types';
+import { UserQuota, QuotaUsageRecord, QuotaPlan } from '../types';
+
+export const DEFAULT_QUOTA_PLANS: QuotaPlan[] = [
+  {
+    id: 'plan_normal',
+    name: '普通用户',
+    monthlyQuota: 3,
+    perUseDeductionCap: 5,
+    description: '每月3次免费借伞，单次最高抵扣5元',
+  },
+  {
+    id: 'plan_member',
+    name: '会员用户',
+    monthlyQuota: 8,
+    perUseDeductionCap: 8,
+    description: '每月8次免费借伞，单次最高抵扣8元',
+  },
+  {
+    id: 'plan_enterprise',
+    name: '企业用户',
+    monthlyQuota: 20,
+    perUseDeductionCap: 10,
+    description: '每月20次免费借伞，单次最高抵扣10元',
+  },
+];
+
+export const getQuotaPlanById = (planId: string): QuotaPlan | undefined => {
+  return DEFAULT_QUOTA_PLANS.find(p => p.id === planId);
+};
+
+export const getCurrentPlan = (quota: UserQuota): QuotaPlan => {
+  return getQuotaPlanById(quota.currentPlanId) || DEFAULT_QUOTA_PLANS[0];
+};
+
+export const getPendingPlan = (quota: UserQuota): QuotaPlan | undefined => {
+  if (!quota.pendingPlanId) return undefined;
+  return getQuotaPlanById(quota.pendingPlanId);
+};
+
+export const switchQuotaPlan = (
+  quota: UserQuota,
+  newPlanId: string
+): UserQuota => {
+  const newPlan = getQuotaPlanById(newPlanId);
+  if (!newPlan) return quota;
+
+  const nextResetDate = getNextResetDate();
+
+  return {
+    ...quota,
+    pendingPlanId: newPlanId,
+    pendingPlanEffectiveDate: nextResetDate,
+  };
+};
 
 export interface MonthlyQuotaRecord {
   month: string;
   monthlyQuota: number;
   usedQuota: number;
+  planName: string;
   cycleStartDate: string;
   cycleEndDate: string;
 }
@@ -15,6 +69,7 @@ export const generateMonthlyHistory = (
 ): MonthlyQuotaRecord[] => {
   const history: MonthlyQuotaRecord[] = [];
   const today = new Date();
+  const currentPlan = getCurrentPlan(currentQuota);
 
   for (let i = 0; i < monthsCount; i++) {
     const targetDate = new Date(today.getFullYear(), today.getMonth() - i, 1);
@@ -31,8 +86,9 @@ export const generateMonthlyHistory = (
 
     history.push({
       month: monthStr,
-      monthlyQuota: currentQuota.monthlyQuota,
+      monthlyQuota: currentPlan.monthlyQuota,
       usedQuota,
+      planName: currentPlan.name,
       cycleStartDate: monthStart.toISOString().split('T')[0],
       cycleEndDate: monthEnd.toISOString().split('T')[0],
     });
@@ -68,10 +124,32 @@ export const resetMonthlyQuota = (
   if (needsReset) {
     const cycleStart = new Date(currentYear, currentMonth, 1);
     const cycleEnd = new Date(currentYear, currentMonth + 1, 0);
+
+    let effectivePlanId = quota.currentPlanId;
+    let monthlyQuota = quota.monthlyQuota;
+    let pendingPlanId = quota.pendingPlanId;
+    let pendingPlanEffectiveDate = quota.pendingPlanEffectiveDate;
+
+    if (pendingPlanId && pendingPlanEffectiveDate) {
+      const effectiveDate = new Date(pendingPlanEffectiveDate);
+      if (currentDate >= effectiveDate) {
+        const pendingPlan = getQuotaPlanById(pendingPlanId);
+        if (pendingPlan) {
+          effectivePlanId = pendingPlanId;
+          monthlyQuota = pendingPlan.monthlyQuota;
+          pendingPlanId = undefined;
+          pendingPlanEffectiveDate = undefined;
+        }
+      }
+    }
     
     return {
       ...quota,
       usedQuota: 0,
+      monthlyQuota,
+      currentPlanId: effectivePlanId,
+      pendingPlanId,
+      pendingPlanEffectiveDate,
       lastResetDate: currentDate.toISOString().split('T')[0],
       cycleStartDate: cycleStart.toISOString().split('T')[0],
       cycleEndDate: cycleEnd.toISOString().split('T')[0],
@@ -154,7 +232,8 @@ export const getNextResetDate = (currentDate: Date = new Date()): string => {
 
 export const createInitialQuota = (
   userId: string,
-  monthlyQuota: number = 5
+  monthlyQuota: number = 5,
+  planId: string = 'plan_normal'
 ): UserQuota => {
   const now = new Date();
   const cycleStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -167,6 +246,7 @@ export const createInitialQuota = (
     lastResetDate: now.toISOString().split('T')[0],
     cycleStartDate: cycleStart.toISOString().split('T')[0],
     cycleEndDate: cycleEnd.toISOString().split('T')[0],
+    currentPlanId: planId,
   };
 };
 

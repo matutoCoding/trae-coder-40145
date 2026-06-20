@@ -41,6 +41,14 @@ export interface PricingRule {
   isActive: boolean;
 }
 
+export interface QuotaPlan {
+  id: string;
+  name: string;
+  monthlyQuota: number;
+  perUseDeductionCap: number;
+  description: string;
+}
+
 export interface UserQuota {
   userId: string;
   monthlyQuota: number;
@@ -48,6 +56,9 @@ export interface UserQuota {
   lastResetDate: string;
   cycleStartDate: string;
   cycleEndDate: string;
+  currentPlanId: string;
+  pendingPlanId?: string;
+  pendingPlanEffectiveDate?: string;
 }
 
 export interface User {
@@ -92,6 +103,7 @@ export interface Bill {
   rentalId: string;
   userId: string;
   baseAmount: number;
+  originalBaseAmount: number;
   crossSiteFee: number;
   quotaDiscount: number;
   couponDiscount: number;
@@ -140,6 +152,7 @@ export interface QuotaUsageRecord {
 export interface CalculationResult {
   finalAmount: number;
   baseAmount: number;
+  originalBaseAmount: number;
   crossSiteFee: number;
   couponDiscount: number;
   promotionDiscount: number;

@@ -5,6 +5,7 @@ import {
   Clock,
   RefreshCw,
   Settings,
+  Shield,
   History,
   CheckCircle,
   AlertTriangle,
@@ -25,6 +26,7 @@ import {
 } from 'recharts';
 import { useStore } from '../store/useStore';
 import { Modal } from '../components/Modal';
+import { QuotaPlan } from '../types';
 import {
   getRemainingQuota,
   getQuotaUsagePercentage,
@@ -37,21 +39,29 @@ import {
   getNextResetDate,
   getDaysUntilReset,
   MonthlyQuotaRecord,
+  getCurrentPlan,
+  getPendingPlan,
+  DEFAULT_QUOTA_PLANS,
 } from '../services/quotaService';
 import { formatCurrency, formatDateTime, formatDate } from '../services/transactionService';
 
 export const QuotaManagement = () => {
-  const { userQuota, quotaUsageRecords, updateMonthlyQuota, resetQuotaManually, pricingRule, user } = useStore();
+  const { userQuota, quotaUsageRecords, updateMonthlyQuota, resetQuotaManually, user, quotaPlans, switchQuotaPlan } = useStore();
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [newMonthlyQuota, setNewMonthlyQuota] = useState(userQuota.monthlyQuota);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
+  const [confirmPlanOpen, setConfirmPlanOpen] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<QuotaPlan | null>(null);
 
   const { quota: currentQuota, wasReset } = checkAndResetQuotaIfNeeded(userQuota);
+
+  const currentPlan = getCurrentPlan(currentQuota);
+  const pendingPlan = getPendingPlan(currentQuota);
 
   const remainingQuota = getRemainingQuota(currentQuota);
   const usagePercentage = getQuotaUsagePercentage(currentQuota);
   const daysRemaining = calculateDaysRemainingInCycle(currentQuota);
-  const totalSavings = calculateQuotaSavings(quotaUsageRecords, pricingRule.pricePerHour);
+  const totalSavings = calculateQuotaSavings(quotaUsageRecords, currentPlan.perUseDeductionCap);
   const nextResetDate = getNextResetDate();
   const daysUntilReset = getDaysUntilReset();
 
@@ -71,6 +81,19 @@ export const QuotaManagement = () => {
   const handleReset = () => {
     resetQuotaManually();
     setConfirmResetOpen(false);
+  };
+
+  const handleSwitchPlan = (plan: QuotaPlan) => {
+    setSelectedPlan(plan);
+    setConfirmPlanOpen(true);
+  };
+
+  const confirmSwitchPlan = () => {
+    if (selectedPlan) {
+      switchQuotaPlan(selectedPlan.id);
+    }
+    setConfirmPlanOpen(false);
+    setSelectedPlan(null);
   };
 
   const getProgressColor = (percentage: number) => {
@@ -261,7 +284,7 @@ export const QuotaManagement = () => {
                   </div>
                 </div>
                 <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium">
-                  固定发放
+                  {currentPlan.name}
                 </span>
               </div>
             </div>
@@ -297,7 +320,7 @@ export const QuotaManagement = () => {
                 <div>
                   <p className="font-medium text-gray-700">使用规则</p>
                   <p className="text-gray-500">
-                    每次借伞可使用1次免费额度，抵扣 {formatCurrency(pricingRule.pricePerHour)}
+                    每次借伞可使用1次免费额度，抵扣最高 {formatCurrency(currentPlan.perUseDeductionCap)}
                   </p>
                 </div>
               </div>
@@ -318,6 +341,76 @@ export const QuotaManagement = () => {
       </div>
 
       <div className="card animate-slide-up animate-stagger-3">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <Shield className="w-5 h-5 text-primary-500" />
+            额度套餐
+          </h3>
+        </div>
+
+        {pendingPlan && (
+          <div className="mb-4 flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <Clock className="w-5 h-5 text-blue-500 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-blue-800">
+                已选择「{pendingPlan.name}」，将于下月1日生效
+              </p>
+              <p className="text-xs text-blue-600">
+                每月{pendingPlan.monthlyQuota}次 · 单次最高抵扣{formatCurrency(pendingPlan.perUseDeductionCap)}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {quotaPlans.map((plan) => {
+            const isCurrent = plan.id === currentQuota.currentPlanId;
+            const isPending = plan.id === currentQuota.pendingPlanId;
+            return (
+              <div
+                key={plan.id}
+                onClick={() => {
+                  if (!isCurrent) handleSwitchPlan(plan);
+                }}
+                className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${
+                  isCurrent
+                    ? 'border-primary-500 bg-primary-50 shadow-md'
+                    : isPending
+                    ? 'border-blue-400 bg-blue-50 hover:shadow-md'
+                    : 'border-gray-200 bg-white hover:border-primary-300 hover:shadow-md'
+                }`}
+              >
+                {isCurrent && (
+                  <div className="absolute -top-2.5 left-4 bg-primary-500 text-white text-xs font-medium px-2.5 py-0.5 rounded-full">
+                    当前套餐
+                  </div>
+                )}
+                {isPending && (
+                  <div className="absolute -top-2.5 left-4 bg-blue-500 text-white text-xs font-medium px-2.5 py-0.5 rounded-full">
+                    下月生效
+                  </div>
+                )}
+                <div className="mt-2">
+                  <h4 className="text-base font-semibold text-gray-900 mb-2">{plan.name}</h4>
+                  <div className="space-y-1.5 mb-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">每月额度</span>
+                      <span className="font-semibold text-gray-900">{plan.monthlyQuota} 次</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">单次抵扣上限</span>
+                      <span className="font-semibold text-gray-900">{formatCurrency(plan.perUseDeductionCap)}</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 leading-relaxed">{plan.description}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card animate-slide-up animate-stagger-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-primary-500" />
@@ -420,7 +513,7 @@ export const QuotaManagement = () => {
                     {record.description}
                   </td>
                   <td className="table-cell text-sm font-medium text-green-600">
-                    {formatCurrency(pricingRule.pricePerHour * record.quotaUsed)}
+                    {formatCurrency(currentPlan.perUseDeductionCap * record.quotaUsed)}
                   </td>
                 </tr>
               ))}
@@ -535,6 +628,68 @@ export const QuotaManagement = () => {
             </button>
             <button onClick={handleReset} className="btn-danger">
               确认重置
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={confirmPlanOpen}
+        onClose={() => {
+          setConfirmPlanOpen(false);
+          setSelectedPlan(null);
+        }}
+        title="切换额度套餐"
+        size="md"
+      >
+        <div className="space-y-4">
+          {selectedPlan && (
+            <>
+              <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg">
+                <Shield className="w-8 h-8 text-blue-500 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-blue-900">
+                    确认切换到「{selectedPlan.name}」套餐？
+                  </p>
+                  <p className="text-sm text-blue-700">
+                    新套餐将于下月1日生效，当前周期仍使用「{currentPlan.name}」套餐
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-gray-500 mb-1">当前套餐</p>
+                  <p className="text-lg font-semibold text-gray-900">{currentPlan.name}</p>
+                  <p className="text-gray-500">{currentPlan.monthlyQuota}次/月 · 抵扣{formatCurrency(currentPlan.perUseDeductionCap)}/次</p>
+                </div>
+                <div className="p-3 bg-primary-50 rounded-lg">
+                  <p className="text-primary-600 mb-1">切换至</p>
+                  <p className="text-lg font-semibold text-primary-700">{selectedPlan.name}</p>
+                  <p className="text-primary-500">{selectedPlan.monthlyQuota}次/月 · 抵扣{formatCurrency(selectedPlan.perUseDeductionCap)}/次</p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-yellow-50 rounded-lg">
+                <p className="text-sm text-yellow-700">
+                  <strong>提示：</strong>套餐切换将在下一个计费周期（下月1日）自动生效，当前周期套餐保持不变。
+                </p>
+              </div>
+            </>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4">
+            <button
+              onClick={() => {
+                setConfirmPlanOpen(false);
+                setSelectedPlan(null);
+              }}
+              className="btn-secondary"
+            >
+              取消
+            </button>
+            <button onClick={confirmSwitchPlan} className="btn-primary">
+              确认切换
             </button>
           </div>
         </div>

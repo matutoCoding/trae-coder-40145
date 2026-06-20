@@ -118,13 +118,16 @@ export const getCouponDescription = (coupon: Coupon): string => {
 export const calculateQuotaDiscount = (
   baseAmount: number,
   quotaUsed: number,
-  pricingRule: PricingRule
+  pricingRule: PricingRule,
+  perUseDeductionCap?: number
 ): { quotaDiscount: number; effectiveAmount: number } => {
   if (quotaUsed <= 0 || baseAmount <= 0) {
     return { quotaDiscount: 0, effectiveAmount: baseAmount };
   }
 
-  const quotaValue = pricingRule.pricePerHour;
+  const quotaValue = perUseDeductionCap != null && perUseDeductionCap > 0
+    ? Math.min(pricingRule.pricePerHour, perUseDeductionCap)
+    : pricingRule.pricePerHour;
   const quotaDiscount = Math.min(quotaValue * quotaUsed, baseAmount);
   const effectiveAmount = Math.max(0, baseAmount - quotaDiscount);
 
@@ -141,12 +144,16 @@ export const calculateFinalAmount = (
   promotions: DiscountPromotion[],
   config: DiscountConfig,
   pricingRule: PricingRule,
-  useQuota: number = 0
+  useQuota: number = 0,
+  perUseDeductionCap?: number
 ): CalculationResult => {
+  const originalBaseAmount = Math.round(baseAmount * 100) / 100;
+
   const { quotaDiscount, effectiveAmount } = calculateQuotaDiscount(
     baseAmount,
     useQuota,
-    pricingRule
+    pricingRule,
+    perUseDeductionCap
   );
 
   const details: DiscountDetail[] = [];
@@ -226,7 +233,8 @@ export const calculateFinalAmount = (
 
   return {
     finalAmount: Math.round(currentAmount * 100) / 100,
-    baseAmount: Math.round(baseAmount * 100) / 100,
+    baseAmount: Math.round(effectiveAmount * 100) / 100,
+    originalBaseAmount,
     crossSiteFee: Math.round(crossSiteFee * 100) / 100,
     couponDiscount: Math.round(couponDiscount * 100) / 100,
     promotionDiscount: Math.round(promotionDiscount * 100) / 100,
