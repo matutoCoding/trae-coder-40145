@@ -15,11 +15,21 @@ import {
   ChevronRight,
   Receipt,
   TrendingUp,
+  BarChart3,
+  ChevronDown,
 } from 'lucide-react';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  Legend,
+} from 'recharts';
 import { useStore } from '../store/useStore';
 import { Modal } from '../components/Modal';
 import { DiscountDetails } from '../components/DiscountDetails';
-import { Bill, RentalRecord } from '../types';
+import { Bill, RentalRecord, QuotaPlan } from '../types';
 import {
   getBillStatusLabel,
   getBillStatusColor,
@@ -30,9 +40,10 @@ import {
   formatDuration,
   formatDate,
 } from '../services/transactionService';
+import { getQuotaPlanById, DEFAULT_QUOTA_PLANS } from '../services/quotaService';
 
 type FilterStatus = 'all' | 'pending' | 'paid' | 'refunded';
-type ViewTab = 'list' | 'monthly';
+type ViewTab = 'list' | 'monthly' | 'dashboard';
 
 interface MonthlySummary {
   month: string;
@@ -48,6 +59,17 @@ interface MonthlySummary {
   bills: Bill[];
 }
 
+interface PlanStats {
+  planId: string;
+  planName: string;
+  billCount: number;
+  finalAmount: number;
+  quotaDiscount: number;
+  bills: Bill[];
+}
+
+const COLORS = ['#3b82f6', '#f97316', '#8b5cf6', '#10b981', '#06b6d4'];
+
 export const BillManagement = () => {
   const [viewTab, setViewTab] = useState<ViewTab>('list');
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
@@ -58,8 +80,10 @@ export const BillManagement = () => {
   const [refundReason, setRefundReason] = useState('');
   const [refundBillId, setRefundBillId] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [dashboardMonth, setDashboardMonth] = useState<string | null>(null);
+  const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
 
-  const { bills, rentalRecords, transactions, payBill, refundBill } = useStore();
+  const { bills, rentalRecords, transactions, payBill, refundBill, quotaPlans } = useStore();
 
   const getRentalForBill = (billId: string): RentalRecord | undefined => {
     return rentalRecords.find((r) => r.id === billId || r.id === billId.replace('bill_', 'rental_'));
@@ -120,15 +144,65 @@ export const BillManagement = () => {
   }, [monthlySummaries, selectedMonth]);
 
   const selectedMonthTransactionTotal = useMemo(() => {
-    if (!selectedMonth) return 0;
-    const [year, m] = selectedMonth.split('-');
+    if (!selectedMonth || !selectedMonthSummary) return 0;
+    const billIds = new Set(selectedMonthSummary.bills.map(b => b.id));
     return transactions
-      .filter(t => {
-        const d = new Date(t.createTime);
-        return d.getFullYear() === parseInt(year) && d.getMonth() + 1 === parseInt(m) && t.type === 'rental';
-      })
+      .filter(t => t.type === 'rental' && t.relatedBillId && billIds.has(t.relatedBillId))
       .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-  }, [transactions, selectedMonth]);
+  }, [transactions, selectedMonth, selectedMonthSummary]);
+
+  const selectedMonthPaidAmount = useMemo(() => {
+    if (!selectedMonthSummary) return 0;
+    return selectedMonthSummary.bills
+      .filter(b => b.status === 'paid')
+      .reduce((sum, b) => sum + b.finalAmount, 0);
+  }, [selectedMonthSummary]);
+
+  const dashboardMonthSummary = useMemo(() => {
+    if (!dashboardMonth) return null;
+    return monthlySummaries.find(s => s.month === dashboardMonth) || null;
+  }, [monthlySummaries, dashboardMonth]);
+
+  const costCompositionData = useMemo(() => {
+    if (!dashboardMonthSummary) return [];
+    return [
+      { name: '基础费用', value: dashboardMonthSummary.originalBaseAmount, color: '#3b82f6' },
+      { name: '异点费', value: dashboardMonthSummary.crossSiteFee, color: '#f97316' },
+      { name: '额度抵扣', value: dashboardMonthSummary.quotaDiscount, color: '#8b5cf6' },
+      { name: '优惠券', value: dashboardMonthSummary.couponDiscount, color: '#10b981' },
+      { name: '满减', value: dashboardMonthSummary.promotionDiscount, color: '#06b6d4' },
+    ].filter(item => item.value > 0);
+  }, [dashboardMonthSummary]);
+
+  const planStats = useMemo((): PlanStats[] => {
+    if (!dashboardMonthSummary) return [];
+    const planMap = new Map<string, Bill[]>();
+    
+    for (const bill of dashboardMonthSummary.bills) {
+      const planId = bill.quotaPlanId || 'plan_normal';
+      if (!planMap.has(planId)) {
+        planMap.set(planId, []);
+      }
+      planMap.get(planId)!.push(bill);
+    }
+
+    const plans = quotaPlans.length > 0 ? quotaPlans : DEFAULT_QUOTA_PLANS;
+    const stats: PlanStats[] = [];
+    
+    for (const [planId, planBills] of planMap) {
+      const plan = getQuotaPlanById(planId, plans);
+      stats.push({
+        planId,
+        planName: plan?.name || '未知套餐',
+        billCount: planBills.length,
+        finalAmount: planBills.reduce((sum, b) => sum + b.finalAmount, 0),
+        quotaDiscount: planBills.reduce((sum, b) => sum + (b.quotaDiscount || 0), 0),
+        bills: planBills.sort((a, b) => new Date(b.createTime).getTime() - new Date(a.createTime).getTime()),
+      });
+    }
+
+    return stats.sort((a, b) => b.finalAmount - a.finalAmount);
+  }, [dashboardMonthSummary, quotaPlans]);
 
   const handleViewDetail = (bill: Bill) => {
     setSelectedBill(bill);
@@ -409,12 +483,20 @@ export const BillManagement = () => {
               </h4>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                 <div>
-                  <p className="text-gray-500">基础费用</p>
-                  <p className="font-bold text-gray-900">{formatCurrency(selectedMonthSummary.originalBaseAmount)}</p>
+                  <p className="text-gray-500">账单实收</p>
+                  <p className="font-bold text-primary-600">{formatCurrency(selectedMonthPaidAmount)}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">关联消费</p>
+                  <p className="font-bold text-gray-900">{formatCurrency(selectedMonthTransactionTotal)}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">异点费</p>
                   <p className="font-bold text-gray-900">{formatCurrency(selectedMonthSummary.crossSiteFee)}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">优惠合计</p>
+                  <p className="font-bold text-green-700">-{formatCurrency(selectedMonthSummary.totalDiscount)}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">额度抵扣</p>
@@ -429,24 +511,25 @@ export const BillManagement = () => {
                   <p className="font-bold text-green-600">-{formatCurrency(selectedMonthSummary.promotionDiscount)}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500">优惠合计</p>
-                  <p className="font-bold text-green-700">-{formatCurrency(selectedMonthSummary.totalDiscount)}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500">实收金额</p>
-                  <p className="font-bold text-primary-600">{formatCurrency(selectedMonthSummary.finalAmount)}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500">消费明细扣款</p>
-                  <p className="font-bold text-gray-900">{formatCurrency(selectedMonthTransactionTotal)}</p>
+                  <p className="text-gray-500">基础费用</p>
+                  <p className="font-bold text-gray-900">{formatCurrency(selectedMonthSummary.originalBaseAmount)}</p>
                 </div>
               </div>
-              {Math.abs(selectedMonthSummary.finalAmount - selectedMonthTransactionTotal) < 0.01 && (
-                <div className="mt-3 flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-2 rounded-lg">
-                  <Receipt className="w-4 h-4" />
-                  <span>账单实收与消费明细扣款总额一致</span>
-                </div>
-              )}
+              <div className={`mt-3 flex items-center gap-2 text-sm px-3 py-2 rounded-lg ${
+                Math.abs(selectedMonthPaidAmount - selectedMonthTransactionTotal) < 0.01
+                  ? 'text-green-600 bg-green-50'
+                  : 'text-red-600 bg-red-50'
+              }`}>
+                <Receipt className="w-4 h-4" />
+                <span>
+                  对账状态: {Math.abs(selectedMonthPaidAmount - selectedMonthTransactionTotal) < 0.01 ? '一致' : '不一致'}
+                  {Math.abs(selectedMonthPaidAmount - selectedMonthTransactionTotal) >= 0.01 && (
+                    <span className="ml-2">
+                      (差额: {formatCurrency(Math.abs(selectedMonthPaidAmount - selectedMonthTransactionTotal))})
+                    </span>
+                  )}
+                </span>
+              </div>
             </div>
           )}
 
@@ -511,6 +594,156 @@ export const BillManagement = () => {
     </div>
   );
 
+  const renderDashboardView = () => {
+    const effectiveMonth = dashboardMonth || (monthlySummaries.length > 0 ? monthlySummaries[0].month : null);
+    const effectiveSummary = dashboardMonth
+      ? dashboardMonthSummary
+      : (monthlySummaries.length > 0 ? monthlySummaries[0] : null);
+
+    return (
+      <div className="space-y-6">
+        <div className="card animate-slide-up">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-primary-500" />
+              <h3 className="text-lg font-semibold text-gray-900">经营看板</h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-gray-400" />
+              <select
+                value={effectiveMonth || ''}
+                onChange={(e) => setDashboardMonth(e.target.value || null)}
+                className="input-field w-auto text-sm"
+              >
+                {monthlySummaries.map((s) => (
+                  <option key={s.month} value={s.month}>
+                    {s.monthLabel}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {effectiveSummary ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className="p-4 bg-blue-50 rounded-xl">
+                  <p className="text-sm text-blue-600 font-medium">订单数</p>
+                  <p className="text-2xl font-bold text-blue-700 mt-1">{effectiveSummary.billCount}</p>
+                </div>
+                <div className="p-4 bg-green-50 rounded-xl">
+                  <p className="text-sm text-green-600 font-medium">实收金额</p>
+                  <p className="text-2xl font-bold text-green-700 mt-1">{formatCurrency(effectiveSummary.finalAmount)}</p>
+                </div>
+                <div className="p-4 bg-purple-50 rounded-xl">
+                  <p className="text-sm text-purple-600 font-medium">优惠总额</p>
+                  <p className="text-2xl font-bold text-purple-700 mt-1">{formatCurrency(effectiveSummary.totalDiscount)}</p>
+                </div>
+                <div className="p-4 bg-orange-50 rounded-xl">
+                  <p className="text-sm text-orange-600 font-medium">异点费</p>
+                  <p className="text-2xl font-bold text-orange-700 mt-1">{formatCurrency(effectiveSummary.crossSiteFee)}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="p-4 bg-gray-50 rounded-xl">
+                  <h4 className="font-medium text-gray-700 mb-4">费用构成</h4>
+                  {costCompositionData.length > 0 ? (
+                    <div className="h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={costCompositionData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={50}
+                            outerRadius={80}
+                            paddingAngle={2}
+                            dataKey="value"
+                            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(1)}%`}
+                            labelLine={false}
+                          >
+                            {costCompositionData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(value: number) => formatCurrency(value)}
+                          />
+                          <Legend />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="h-64 flex items-center justify-center text-gray-400">
+                      暂无数据
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-4 bg-gray-50 rounded-xl">
+                  <h4 className="font-medium text-gray-700 mb-4">套餐贡献</h4>
+                  {planStats.length > 0 ? (
+                    <div className="space-y-2">
+                      {planStats.map((plan) => (
+                        <div key={plan.planId} className="bg-white rounded-lg overflow-hidden">
+                          <div
+                            className="p-3 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+                            onClick={() => setExpandedPlanId(expandedPlanId === plan.planId ? null : plan.planId)}
+                          >
+                            <div className="flex items-center gap-3">
+                              <ChevronDown
+                                className={`w-4 h-4 text-gray-400 transition-transform ${
+                                  expandedPlanId === plan.planId ? 'rotate-180' : ''
+                                }`}
+                              />
+                              <div>
+                                <p className="font-medium text-gray-900">{plan.planName}</p>
+                                <p className="text-xs text-gray-500">{plan.billCount} 笔订单</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold text-primary-600">{formatCurrency(plan.finalAmount)}</p>
+                              <p className="text-xs text-blue-500">额度抵扣: {formatCurrency(plan.quotaDiscount)}</p>
+                            </div>
+                          </div>
+                          {expandedPlanId === plan.planId && (
+                            <div className="border-t border-gray-100 max-h-60 overflow-y-auto">
+                              {plan.bills.map((bill) => (
+                                <div
+                                  key={bill.id}
+                                  className="p-2 flex items-center justify-between text-sm hover:bg-gray-50 cursor-pointer"
+                                  onClick={() => handleViewDetail(bill)}
+                                >
+                                  <span className="font-mono text-xs text-gray-500">{bill.id}</span>
+                                  <span className="text-gray-700">{formatDate(bill.createTime)}</span>
+                                  <span className="font-medium text-primary-600">{formatCurrency(bill.finalAmount)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="h-64 flex items-center justify-center text-gray-400">
+                      暂无套餐数据
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-12 text-gray-400">
+              <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>暂无账单数据</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -568,10 +801,26 @@ export const BillManagement = () => {
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-600" />
             )}
           </button>
+          <button
+            onClick={() => { setViewTab('dashboard'); setSelectedMonth(null); }}
+            className={`flex-1 py-3 px-4 text-center font-medium transition-colors relative ${
+              viewTab === 'dashboard'
+                ? 'text-primary-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <BarChart3 className="w-5 h-5 inline mr-2" />
+            经营看板
+            {viewTab === 'dashboard' && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-600" />
+            )}
+          </button>
         </div>
       </div>
 
-      {viewTab === 'list' ? renderListView() : renderMonthlyView()}
+      {viewTab === 'list' && renderListView()}
+      {viewTab === 'monthly' && renderMonthlyView()}
+      {viewTab === 'dashboard' && renderDashboardView()}
 
       <Modal
         isOpen={detailModalOpen}

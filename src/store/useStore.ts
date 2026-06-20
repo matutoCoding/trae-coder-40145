@@ -14,6 +14,7 @@ import {
   QuotaUsageRecord,
   CalculationResult,
   QuotaPlan,
+  PlanChangeRecord,
 } from '../types';
 import {
   mockUser,
@@ -27,6 +28,7 @@ import {
   mockBills,
   mockTransactions,
   mockQuotaUsageRecords,
+  mockPlanChangeRecords,
   generateId,
 } from '../data/mockData';
 import {
@@ -35,7 +37,7 @@ import {
   calculateRentalDuration,
   calculateCrossSiteReturn,
 } from '../services/discountService';
-import { useQuota, checkAndResetQuotaIfNeeded, getCurrentPlan, switchQuotaPlan as switchPlan, DEFAULT_QUOTA_PLANS } from '../services/quotaService';
+import { useQuota, checkAndResetQuotaIfNeeded, getCurrentPlan, switchQuotaPlan as switchPlan, createNewPlan, togglePlanActive, updatePlan as updatePlanSvc, getNextResetDate, DEFAULT_QUOTA_PLANS } from '../services/quotaService';
 import { generateBill, payBill, refundBill } from '../services/billService';
 import { createRechargeTransaction, formatCurrency } from '../services/transactionService';
 
@@ -43,6 +45,7 @@ interface AppState {
   user: User;
   userQuota: UserQuota;
   quotaPlans: QuotaPlan[];
+  planChangeRecords: PlanChangeRecord[];
   coupons: Coupon[];
   promotions: DiscountPromotion[];
   discountConfig: DiscountConfig;
@@ -83,6 +86,9 @@ interface AppState {
   updateMonthlyQuota: (newQuota: number) => void;
   resetQuotaManually: () => void;
   switchQuotaPlan: (planId: string) => void;
+  addQuotaPlan: (name: string, monthlyQuota: number, perUseDeductionCap: number, description: string) => void;
+  updateQuotaPlan: (planId: string, updates: Partial<Pick<QuotaPlan, 'name' | 'monthlyQuota' | 'perUseDeductionCap' | 'description'>>) => void;
+  toggleQuotaPlanActive: (planId: string) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -91,6 +97,7 @@ export const useStore = create<AppState>()(
       user: mockUser,
       userQuota: mockUserQuota,
       quotaPlans: DEFAULT_QUOTA_PLANS,
+      planChangeRecords: mockPlanChangeRecords,
       coupons: mockCoupons,
       promotions: mockPromotions,
       discountConfig: mockDiscountConfig,
@@ -287,7 +294,7 @@ export const useStore = create<AppState>()(
           couponId: state.selectedCoupon?.id,
         };
 
-        const bill = generateBill(updatedRental, calculationResult);
+        const bill = generateBill(updatedRental, calculationResult, getCurrentPlan(state.userQuota, state.quotaPlans).id);
 
         let updatedUser = state.user;
         let transaction: Transaction | null = null;
@@ -476,9 +483,52 @@ export const useStore = create<AppState>()(
           },
         })),
 
-      switchQuotaPlan: (planId) =>
+      switchQuotaPlan: (planId) => {
+        const state = get();
+        const newQuota = switchPlan(state.userQuota, planId);
+        
+        const nextResetDate = getNextResetDate();
+        const [year, month] = nextResetDate.split('-');
+        const effectiveMonth = `${year}-${month}`;
+        
+        const changeRecord: PlanChangeRecord = {
+          id: generateId('plan_change'),
+          userId: state.user.id,
+          fromPlanId: state.userQuota.currentPlanId,
+          toPlanId: planId,
+          effectiveMonth,
+          changedAt: new Date().toISOString(),
+          changedBy: 'user',
+        };
+        
+        set(s => ({
+          userQuota: newQuota,
+          planChangeRecords: [changeRecord, ...s.planChangeRecords],
+        }));
+        
+        state.addNotification('套餐已变更，将在下个周期生效', 'success');
+      },
+
+      addQuotaPlan: (name, monthlyQuota, perUseDeductionCap, description) => {
+        const newPlan = createNewPlan(name, monthlyQuota, perUseDeductionCap, description);
         set(state => ({
-          userQuota: switchPlan(state.userQuota, planId),
+          quotaPlans: [...state.quotaPlans, newPlan],
+        }));
+        get().addNotification('套餐已创建', 'success');
+      },
+
+      updateQuotaPlan: (planId, updates) =>
+        set(state => ({
+          quotaPlans: state.quotaPlans.map(p =>
+            p.id === planId ? updatePlanSvc(p, updates) : p
+          ),
+        })),
+
+      toggleQuotaPlanActive: (planId) =>
+        set(state => ({
+          quotaPlans: state.quotaPlans.map(p =>
+            p.id === planId ? togglePlanActive(p) : p
+          ),
         })),
     }),
     {
@@ -486,6 +536,8 @@ export const useStore = create<AppState>()(
       partialize: state => ({
         user: state.user,
         userQuota: state.userQuota,
+        quotaPlans: state.quotaPlans,
+        planChangeRecords: state.planChangeRecords,
         coupons: state.coupons,
         promotions: state.promotions,
         discountConfig: state.discountConfig,

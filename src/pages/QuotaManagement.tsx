@@ -13,6 +13,7 @@ import {
   Minus,
   BarChart3,
   RotateCcw,
+  Edit2,
 } from 'lucide-react';
 import {
   BarChart,
@@ -26,6 +27,7 @@ import {
 } from 'recharts';
 import { useStore } from '../store/useStore';
 import { Modal } from '../components/Modal';
+import { Switch } from '../components/Switch';
 import { QuotaPlan } from '../types';
 import {
   getRemainingQuota,
@@ -46,12 +48,36 @@ import {
 import { formatCurrency, formatDateTime, formatDate } from '../services/transactionService';
 
 export const QuotaManagement = () => {
-  const { userQuota, quotaUsageRecords, updateMonthlyQuota, resetQuotaManually, user, quotaPlans, switchQuotaPlan } = useStore();
+  const {
+    userQuota,
+    quotaUsageRecords,
+    updateMonthlyQuota,
+    resetQuotaManually,
+    user,
+    quotaPlans,
+    switchQuotaPlan,
+    addQuotaPlan,
+    updateQuotaPlan,
+    toggleQuotaPlanActive,
+  } = useStore();
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [newMonthlyQuota, setNewMonthlyQuota] = useState(userQuota.monthlyQuota);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [confirmPlanOpen, setConfirmPlanOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<QuotaPlan | null>(null);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<QuotaPlan | null>(null);
+  const [planForm, setPlanForm] = useState<{
+    name: string;
+    monthlyQuota: number;
+    perUseDeductionCap: number;
+    description: string;
+  }>({
+    name: '',
+    monthlyQuota: 0,
+    perUseDeductionCap: 0,
+    description: '',
+  });
 
   const { quota: currentQuota, wasReset } = checkAndResetQuotaIfNeeded(userQuota);
 
@@ -94,6 +120,52 @@ export const QuotaManagement = () => {
     }
     setConfirmPlanOpen(false);
     setSelectedPlan(null);
+  };
+
+  const handleOpenPlanModal = (plan?: QuotaPlan) => {
+    if (plan) {
+      setEditingPlan(plan);
+      setPlanForm({
+        name: plan.name,
+        monthlyQuota: plan.monthlyQuota,
+        perUseDeductionCap: plan.perUseDeductionCap,
+        description: plan.description,
+      });
+    } else {
+      setEditingPlan(null);
+      setPlanForm({
+        name: '',
+        monthlyQuota: 5,
+        perUseDeductionCap: 5,
+        description: '',
+      });
+    }
+    setPlanModalOpen(true);
+  };
+
+  const handleSavePlan = () => {
+    if (!planForm.name.trim()) return;
+
+    if (editingPlan) {
+      updateQuotaPlan(editingPlan.id, {
+        name: planForm.name,
+        monthlyQuota: planForm.monthlyQuota,
+        perUseDeductionCap: planForm.perUseDeductionCap,
+        description: planForm.description,
+      });
+    } else {
+      addQuotaPlan(
+        planForm.name,
+        planForm.monthlyQuota,
+        planForm.perUseDeductionCap,
+        planForm.description
+      );
+    }
+    setPlanModalOpen(false);
+  };
+
+  const isCurrentOrPendingPlan = (planId: string) => {
+    return planId === currentQuota.currentPlanId || planId === currentQuota.pendingPlanId;
   };
 
   const getProgressColor = (percentage: number) => {
@@ -344,8 +416,15 @@ export const QuotaManagement = () => {
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <Shield className="w-5 h-5 text-primary-500" />
-            额度套餐
+            套餐管理
           </h3>
+          <button
+            onClick={() => handleOpenPlanModal()}
+            className="btn-primary flex items-center gap-2 text-sm"
+          >
+            <Plus className="w-4 h-4" />
+            新增套餐
+          </button>
         </div>
 
         {pendingPlan && (
@@ -362,52 +441,110 @@ export const QuotaManagement = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {quotaPlans.map((plan) => {
-            const isCurrent = plan.id === currentQuota.currentPlanId;
-            const isPending = plan.id === currentQuota.pendingPlanId;
-            return (
-              <div
-                key={plan.id}
-                onClick={() => {
-                  if (!isCurrent) handleSwitchPlan(plan);
-                }}
-                className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${
-                  isCurrent
-                    ? 'border-primary-500 bg-primary-50 shadow-md'
-                    : isPending
-                    ? 'border-blue-400 bg-blue-50 hover:shadow-md'
-                    : 'border-gray-200 bg-white hover:border-primary-300 hover:shadow-md'
-                }`}
-              >
-                {isCurrent && (
-                  <div className="absolute -top-2.5 left-4 bg-primary-500 text-white text-xs font-medium px-2.5 py-0.5 rounded-full">
-                    当前套餐
-                  </div>
-                )}
-                {isPending && (
-                  <div className="absolute -top-2.5 left-4 bg-blue-500 text-white text-xs font-medium px-2.5 py-0.5 rounded-full">
-                    下月生效
-                  </div>
-                )}
-                <div className="mt-2">
-                  <h4 className="text-base font-semibold text-gray-900 mb-2">{plan.name}</h4>
-                  <div className="space-y-1.5 mb-3">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-500">每月额度</span>
-                      <span className="font-semibold text-gray-900">{plan.monthlyQuota} 次</span>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr>
+                <th className="table-header">套餐名称</th>
+                <th className="table-header">每月次数</th>
+                <th className="table-header">单次抵扣上限</th>
+                <th className="table-header">描述</th>
+                <th className="table-header">状态</th>
+                <th className="table-header">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {quotaPlans.map((plan, index) => {
+                const isCurrent = plan.id === currentQuota.currentPlanId;
+                const isPending = plan.id === currentQuota.pendingPlanId;
+                return (
+                  <tr
+                    key={plan.id}
+                    className={`hover:bg-gray-50 transition-colors animate-fade-in ${!plan.isActive ? 'opacity-60' : ''}`}
+                    style={{ animationDelay: `${index * 30}ms` }}
+                  >
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{plan.name}</span>
+                        {isCurrent && (
+                          <span className="bg-primary-100 text-primary-700 text-xs px-2 py-0.5 rounded-full">
+                            当前
+                          </span>
+                        )}
+                        {isPending && (
+                          <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">
+                            待生效
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="table-cell text-sm text-gray-700">
+                      {plan.monthlyQuota} 次
+                    </td>
+                    <td className="table-cell text-sm text-gray-700">
+                      {formatCurrency(plan.perUseDeductionCap)}
+                    </td>
+                    <td className="table-cell text-sm text-gray-500 max-w-xs truncate">
+                      {plan.description}
+                    </td>
+                    <td className="table-cell">
+                      <Switch
+                        checked={plan.isActive}
+                        onChange={() => toggleQuotaPlanActive(plan.id)}
+                        label={plan.isActive ? '启用' : '停用'}
+                      />
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleOpenPlanModal(plan)}
+                          className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                          title="编辑"
+                        >
+                          <Edit2 className="w-4 h-4 text-gray-500" />
+                        </button>
+                        {!isCurrent && plan.isActive && (
+                          <button
+                            onClick={() => handleSwitchPlan(plan)}
+                            className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+                          >
+                            切换
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {quotaPlans.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="table-cell text-center py-8">
+                    <div className="flex flex-col items-center gap-2 text-gray-400">
+                      <Shield className="w-8 h-8" />
+                      <p>暂无套餐</p>
                     </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-500">单次抵扣上限</span>
-                      <span className="font-semibold text-gray-900">{formatCurrency(plan.perUseDeductionCap)}</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500 leading-relaxed">{plan.description}</p>
-                </div>
-              </div>
-            );
-          })}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
+
+        {editingPlan && isCurrentOrPendingPlan(editingPlan.id) && (
+          <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-yellow-800">
+                  当前套餐修改提示
+                </p>
+                <p className="text-xs text-yellow-700">
+                  修改当前套餐参数仅对未来周期生效，当前周期仍按原配置执行
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="card animate-slide-up animate-stagger-4">
@@ -690,6 +827,101 @@ export const QuotaManagement = () => {
             </button>
             <button onClick={confirmSwitchPlan} className="btn-primary">
               确认切换
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={planModalOpen}
+        onClose={() => setPlanModalOpen(false)}
+        title={editingPlan ? '编辑套餐' : '新增套餐'}
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              套餐名称
+            </label>
+            <input
+              type="text"
+              value={planForm.name}
+              onChange={(e) => setPlanForm({ ...planForm, name: e.target.value })}
+              className="input-field"
+              placeholder="请输入套餐名称"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                每月次数
+              </label>
+              <input
+                type="number"
+                value={planForm.monthlyQuota}
+                onChange={(e) => setPlanForm({ ...planForm, monthlyQuota: parseInt(e.target.value) || 0 })}
+                className="input-field"
+                min="0"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                单次抵扣上限（元）
+              </label>
+              <input
+                type="number"
+                value={planForm.perUseDeductionCap}
+                onChange={(e) => setPlanForm({ ...planForm, perUseDeductionCap: parseFloat(e.target.value) || 0 })}
+                className="input-field"
+                min="0"
+                step="0.5"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              描述
+            </label>
+            <textarea
+              value={planForm.description}
+              onChange={(e) => setPlanForm({ ...planForm, description: e.target.value })}
+              className="input-field min-h-20 resize-y"
+              placeholder="请输入套餐描述"
+              rows={3}
+            />
+          </div>
+
+          {editingPlan && isCurrentOrPendingPlan(editingPlan.id) && (
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-yellow-800">
+                    修改提示
+                  </p>
+                  <p className="text-xs text-yellow-700">
+                    此套餐为当前或待生效套餐，修改后仅对未来周期生效
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4">
+            <button
+              onClick={() => setPlanModalOpen(false)}
+              className="btn-secondary"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSavePlan}
+              className="btn-primary"
+              disabled={!planForm.name.trim()}
+            >
+              {editingPlan ? '保存修改' : '创建套餐'}
             </button>
           </div>
         </div>

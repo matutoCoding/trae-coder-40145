@@ -71,6 +71,16 @@ export const RentUmbrella = () => {
     return previewCharges(previewDuration, selectedBorrowSite, selectedReturnSite, useQuota && canUseQuota ? 1 : 0);
   }, [previewDuration, selectedBorrowSite, selectedReturnSite, selectedCoupon, useQuota, canUseQuota]);
 
+  const returnPreviewResult = useMemo(() => {
+    if (!currentRental || !selectedReturnSite) return null;
+    return previewCharges(
+      elapsedTime,
+      currentRental.borrowSiteId,
+      selectedReturnSite,
+      currentRental.quotaUsed
+    );
+  }, [elapsedTime, currentRental, selectedReturnSite, selectedCoupon]);
+
   const availableCoupons = useMemo(() => {
     return coupons.filter((c) => c.isActive && new Date(c.validTo) > new Date());
   }, [coupons]);
@@ -619,18 +629,20 @@ export const RentUmbrella = () => {
                 )}
               </div>
               <div className="p-4 bg-gray-50 rounded-xl">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">预计费用</span>
-                  <span className="text-2xl font-bold text-primary-600">
-                    {formatCurrency(
-                      previewCharges(
-                        elapsedTime,
-                        currentRental.borrowSiteId,
-                        selectedReturnSite
-                      ).finalAmount
-                    )}
-                  </span>
+                <div className="flex items-center justify-between mb-4">
+                  <span className="font-medium">费用明细</span>
                 </div>
+                {returnPreviewResult && (
+                  <DiscountDetails
+                    details={returnPreviewResult.details}
+                    baseAmount={returnPreviewResult.baseAmount}
+                    originalBaseAmount={returnPreviewResult.originalBaseAmount}
+                    crossSiteFee={returnPreviewResult.crossSiteFee}
+                    finalAmount={returnPreviewResult.finalAmount}
+                    quotaUsed={returnPreviewResult.quotaUsed}
+                    quotaDiscount={returnPreviewResult.details.find(d => d.type === 'quota')?.amount}
+                  />
+                )}
               </div>
               <p className="text-sm text-gray-500 text-center">
                 确认要在该站点还伞吗？
