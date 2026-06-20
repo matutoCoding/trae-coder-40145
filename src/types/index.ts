@@ -47,6 +47,18 @@ export interface QuotaPlan {
   monthlyQuota: number;
   perUseDeductionCap: number;
   description: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface PlanChangeRecord {
+  id: string;
+  userId: string;
+  fromPlanId: string;
+  toPlanId: string;
+  effectiveMonth: string;
+  changedAt: string;
+  changedBy: string;
 }
 
 export interface UserQuota {
@@ -114,6 +126,7 @@ export interface Bill {
   createTime: string;
   paidTime?: string;
   quotaUsed: number;
+  quotaPlanId?: string;
 }
 
 export interface Transaction {

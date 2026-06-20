@@ -9,7 +9,8 @@ import { generateId } from '../data/mockData';
 
 export const generateBill = (
   rental: RentalRecord,
-  calculationResult: CalculationResult
+  calculationResult: CalculationResult,
+  quotaPlanId?: string
 ): Bill => {
   const quotaDiscount = calculationResult.details.find(d => d.type === 'quota')?.amount || 0;
   const totalDiscount = 
@@ -33,6 +34,7 @@ export const generateBill = (
     createTime: new Date().toISOString(),
     paidTime: calculationResult.finalAmount === 0 ? new Date().toISOString() : undefined,
     quotaUsed: calculationResult.quotaUsed,
+    quotaPlanId,
   };
 };
 
@@ -161,4 +163,126 @@ export const calculateTotalDiscount = (bills: Bill[]): number => {
 
 export const getPendingBillsCount = (bills: Bill[]): number => {
   return bills.filter(b => b.status === 'pending').length;
+};
+
+export interface MonthlyBusinessSummary {
+  month: string;
+  monthLabel: string;
+  orderCount: number;
+  originalBaseAmount: number;
+  crossSiteFee: number;
+  quotaDiscount: number;
+  couponDiscount: number;
+  promotionDiscount: number;
+  totalDiscount: number;
+  finalAmount: number;
+  crossSiteOrderCount: number;
+  quotaUsedCount: number;
+  couponUsedCount: number;
+}
+
+export interface PlanBusinessSummary {
+  planId: string;
+  planName: string;
+  orderCount: number;
+  finalAmount: number;
+  quotaDiscount: number;
+  couponDiscount: number;
+  promotionDiscount: number;
+}
+
+export const generateMonthlyBusinessSummary = (bills: Bill[]): MonthlyBusinessSummary[] => {
+  const monthMap = new Map<string, MonthlyBusinessSummary>();
+
+  for (const bill of bills) {
+    if (bill.status === 'refunded') continue;
+    const date = new Date(bill.createTime);
+    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+    if (!monthMap.has(monthKey)) {
+      const [year, m] = monthKey.split('-');
+      monthMap.set(monthKey, {
+        month: monthKey,
+        monthLabel: `${year}年${parseInt(m)}月`,
+        orderCount: 0,
+        originalBaseAmount: 0,
+        crossSiteFee: 0,
+        quotaDiscount: 0,
+        couponDiscount: 0,
+        promotionDiscount: 0,
+        totalDiscount: 0,
+        finalAmount: 0,
+        crossSiteOrderCount: 0,
+        quotaUsedCount: 0,
+        couponUsedCount: 0,
+      });
+    }
+
+    const summary = monthMap.get(monthKey)!;
+    summary.orderCount++;
+    summary.originalBaseAmount += bill.originalBaseAmount || bill.baseAmount + (bill.quotaDiscount || 0);
+    summary.crossSiteFee += bill.crossSiteFee;
+    summary.quotaDiscount += bill.quotaDiscount || 0;
+    summary.couponDiscount += bill.couponDiscount || 0;
+    summary.promotionDiscount += bill.promotionDiscount || 0;
+    summary.totalDiscount += bill.totalDiscount;
+    summary.finalAmount += bill.finalAmount;
+    if (bill.crossSiteFee > 0) summary.crossSiteOrderCount++;
+    if ((bill.quotaUsed || 0) > 0) summary.quotaUsedCount++;
+    if ((bill.couponDiscount || 0) > 0) summary.couponUsedCount++;
+  }
+
+  return Array.from(monthMap.values()).sort((a, b) => b.month.localeCompare(a.month));
+};
+
+export const generatePlanBusinessSummary = (
+  bills: Bill[],
+  plans: { id: string; name: string }[]
+): PlanBusinessSummary[] => {
+  const planMap = new Map<string, PlanBusinessSummary>();
+
+  for (const plan of plans) {
+    planMap.set(plan.id, {
+      planId: plan.id,
+      planName: plan.name,
+      orderCount: 0,
+      finalAmount: 0,
+      quotaDiscount: 0,
+      couponDiscount: 0,
+      promotionDiscount: 0,
+    });
+  }
+
+  for (const bill of bills) {
+    if (bill.status === 'refunded') continue;
+    const planId = bill.quotaPlanId || 'plan_normal';
+    const summary = planMap.get(planId);
+    if (!summary) continue;
+
+    summary.orderCount++;
+    summary.finalAmount += bill.finalAmount;
+    summary.quotaDiscount += bill.quotaDiscount || 0;
+    summary.couponDiscount += bill.couponDiscount || 0;
+    summary.promotionDiscount += bill.promotionDiscount || 0;
+  }
+
+  return Array.from(planMap.values());
+};
+
+export const reconcileBillWithTransaction = (
+  bills: Bill[],
+  transactions: { type: string; relatedBillId?: string; amount: number }[]
+): { matched: boolean; difference: number; billTotal: number; transactionTotal: number } => {
+  const paidBills = bills.filter(b => b.status === 'paid');
+  const billTotal = paidBills.reduce((sum, b) => sum + b.finalAmount, 0);
+
+  const rentalTransactions = transactions.filter(t => t.type === 'rental');
+  const transactionTotal = Math.abs(rentalTransactions.reduce((sum, t) => sum + t.amount, 0));
+
+  return {
+    matched: Math.abs(billTotal - transactionTotal) < 0.01,
+    difference: Math.abs(billTotal - transactionTotal),
+    billTotal,
+    transactionTotal,
+  };
 };
