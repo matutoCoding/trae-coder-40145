@@ -36,7 +36,7 @@ import {
 } from '../services/discountService';
 import { useQuota, checkAndResetQuotaIfNeeded } from '../services/quotaService';
 import { generateBill, payBill, refundBill } from '../services/billService';
-import { createRechargeTransaction } from '../services/transactionService';
+import { createRechargeTransaction, formatCurrency } from '../services/transactionService';
 
 interface AppState {
   user: User;
@@ -70,7 +70,8 @@ interface AppState {
   borrowUmbrella: (siteId: string, useQuota: boolean) => void;
   returnUmbrella: (siteId: string) => void;
   cancelRental: () => void;
-  previewCharges: (durationMinutes: number, borrowSiteId: string, returnSiteId: string) => CalculationResult;
+  previewCharges: (durationMinutes: number, borrowSiteId: string, returnSiteId: string, useQuota?: number) => CalculationResult;
+  calculateDiscountByAmount: (amount: number, coupon: Coupon | null, useQuota?: number) => CalculationResult;
 
   payBill: (billId: string) => void;
   refundBill: (billId: string, reason: string) => void;
@@ -261,21 +262,9 @@ export const useStore = create<AppState>()(
           state.selectedCoupon,
           state.promotions,
           state.discountConfig,
-          state.pricingRule
+          state.pricingRule,
+          state.currentRental.quotaUsed
         );
-
-        calculationResult.quotaUsed = state.currentRental.quotaUsed;
-
-        if (state.currentRental.quotaUsed > 0) {
-          const quotaFreeAmount = state.pricingRule.pricePerHour;
-          calculationResult.details.unshift({
-            type: 'quota',
-            name: '免费额度',
-            amount: quotaFreeAmount,
-            description: '使用本月免费额度1次',
-          });
-          calculationResult.baseAmount = Math.max(0, baseAmount - quotaFreeAmount);
-        }
 
         const updatedRental: RentalRecord = {
           ...state.currentRental,
@@ -305,9 +294,24 @@ export const useStore = create<AppState>()(
             bill.paidTime = result.updatedBill.paidTime;
             updatedUser = result.updatedUser;
             transaction = result.transaction;
+            
+            if (bill.quotaUsed > 0) {
+              transaction.description = `雨伞租借（使用免费额度抵扣${formatCurrency(bill.quotaDiscount)}）`;
+            }
           } catch (e) {
             state.addNotification((e as Error).message, 'error');
           }
+        } else if (bill.finalAmount === 0 && bill.quotaUsed > 0) {
+          transaction = {
+            id: generateId('trans'),
+            userId: state.user.id,
+            type: 'rental',
+            amount: 0,
+            balance: state.user.balance,
+            description: `雨伞租借（免费额度抵扣${formatCurrency(bill.quotaDiscount)}，无需支付）`,
+            createTime: new Date().toISOString(),
+            relatedBillId: bill.id,
+          };
         }
 
         set(s => ({
@@ -328,10 +332,18 @@ export const useStore = create<AppState>()(
           ),
         }));
 
-        state.addNotification(
-          `还伞成功，费用：¥${calculationResult.finalAmount.toFixed(2)}`,
-          'success'
-        );
+        const quotaUsed = calculationResult.quotaUsed;
+        const quotaDiscount = calculationResult.details.find(d => d.type === 'quota')?.amount || 0;
+        let notificationMsg = `还伞成功`;
+        if (quotaUsed > 0) {
+          notificationMsg += `，免费额度抵扣${formatCurrency(quotaDiscount)}`;
+        }
+        if (calculationResult.finalAmount > 0) {
+          notificationMsg += `，支付${formatCurrency(calculationResult.finalAmount)}`;
+        } else if (quotaUsed === 0) {
+          notificationMsg += `，无需支付`;
+        }
+        state.addNotification(notificationMsg, 'success');
       },
 
       cancelRental: () => {
@@ -348,7 +360,7 @@ export const useStore = create<AppState>()(
         state.addNotification('租借已取消', 'info');
       },
 
-      previewCharges: (durationMinutes, borrowSiteId, returnSiteId) => {
+      previewCharges: (durationMinutes, borrowSiteId, returnSiteId, useQuota = 0) => {
         const state = get();
         const baseAmount = calculateBaseAmount(durationMinutes, state.pricingRule);
         const { crossSiteFee } = calculateCrossSiteReturn(
@@ -363,7 +375,21 @@ export const useStore = create<AppState>()(
           state.selectedCoupon,
           state.promotions,
           state.discountConfig,
-          state.pricingRule
+          state.pricingRule,
+          useQuota
+        );
+      },
+
+      calculateDiscountByAmount: (amount, coupon, useQuota = 0) => {
+        const state = get();
+        return calculateFinalAmount(
+          amount,
+          0,
+          coupon,
+          state.promotions,
+          state.discountConfig,
+          state.pricingRule,
+          useQuota
         );
       },
 

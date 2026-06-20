@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Plus,
   Edit2,
@@ -14,7 +14,7 @@ import { useStore } from '../store/useStore';
 import { Switch } from '../components/Switch';
 import { Modal } from '../components/Modal';
 import { Coupon, DiscountPromotion } from '../types';
-import { getCouponTypeLabel } from '../services/discountService';
+import { getCouponTypeLabel, calculateFinalAmount } from '../services/discountService';
 import { formatDate, formatCurrency } from '../services/transactionService';
 
 type TabType = 'pricing' | 'coupons' | 'promotions' | 'order';
@@ -27,6 +27,7 @@ export const PromotionConfig = () => {
   const [editingPromo, setEditingPromo] = useState<DiscountPromotion | null>(null);
   const [demoAmount, setDemoAmount] = useState(50);
   const [demoCoupon, setDemoCoupon] = useState<string | null>(null);
+  const [demoCrossSiteFee, setDemoCrossSiteFee] = useState(0);
 
   const {
     pricingRule,
@@ -45,6 +46,32 @@ export const PromotionConfig = () => {
     setSelectedCoupon,
     selectedCoupon,
   } = useStore();
+
+  const demoSelectedCoupon = demoCoupon ? coupons.find(c => c.id === demoCoupon) || null : null;
+
+  const couponFirstResult = useMemo(() => {
+    const tempConfig = { ...discountConfig, order: 'coupon_first' as const };
+    return calculateFinalAmount(
+      demoAmount,
+      demoCrossSiteFee,
+      demoSelectedCoupon,
+      promotions,
+      tempConfig,
+      pricingRule
+    );
+  }, [demoAmount, demoCrossSiteFee, demoSelectedCoupon, promotions, discountConfig, pricingRule]);
+
+  const promotionFirstResult = useMemo(() => {
+    const tempConfig = { ...discountConfig, order: 'promotion_first' as const };
+    return calculateFinalAmount(
+      demoAmount,
+      demoCrossSiteFee,
+      demoSelectedCoupon,
+      promotions,
+      tempConfig,
+      pricingRule
+    );
+  }, [demoAmount, demoCrossSiteFee, demoSelectedCoupon, promotions, discountConfig, pricingRule]);
 
   const [couponForm, setCouponForm] = useState<Partial<Coupon>>({
     name: '',
@@ -331,7 +358,7 @@ export const PromotionConfig = () => {
                 
                 <div className="text-2xl font-bold text-accent-500 mb-2">
                   {coupon.type === 'fixed' && `${formatCurrency(coupon.value)}`}
-                  {coupon.type === 'percentage' && `${100 - coupon.value}折`}
+                  {coupon.type === 'percentage' && `${(100 - coupon.value) / 10}折`}
                   {coupon.type === 'free_hours' && `免费${coupon.value}小时`}
                 </div>
 
@@ -430,175 +457,419 @@ export const PromotionConfig = () => {
       )}
 
       {activeTab === 'order' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-6">
           <div className="card animate-slide-up">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">优惠顺序配置</h3>
             
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">优惠计算顺序</label>
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => updateDiscountConfig({ order: 'coupon_first' })}
-                    className={`flex-1 p-4 rounded-lg border-2 transition-all ${
-                      discountConfig.order === 'coupon_first'
-                        ? 'border-primary-500 bg-primary-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <Ticket className="w-5 h-5 text-accent-500" />
-                      <ArrowRight className="w-4 h-4 text-gray-400" />
-                      <Tag className="w-5 h-5 text-green-500" />
-                    </div>
-                    <p className="text-sm font-medium text-gray-900">先优惠券后满减</p>
-                  </button>
-                  <button
-                    onClick={() => updateDiscountConfig({ order: 'promotion_first' })}
-                    className={`flex-1 p-4 rounded-lg border-2 transition-all ${
-                      discountConfig.order === 'promotion_first'
-                        ? 'border-primary-500 bg-primary-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <Tag className="w-5 h-5 text-green-500" />
-                      <ArrowRight className="w-4 h-4 text-gray-400" />
-                      <Ticket className="w-5 h-5 text-accent-500" />
-                    </div>
-                    <p className="text-sm font-medium text-gray-900">先满减后优惠券</p>
-                  </button>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">优惠计算顺序</label>
+                  <div className="flex gap-4">
+                    <button
+                      onClick={() => updateDiscountConfig({ order: 'coupon_first' })}
+                      className={`flex-1 p-4 rounded-lg border-2 transition-all ${
+                        discountConfig.order === 'coupon_first'
+                          ? 'border-primary-500 bg-primary-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center gap-2 mb-2">
+                        <Ticket className="w-5 h-5 text-accent-500" />
+                        <ArrowRight className="w-4 h-4 text-gray-400" />
+                        <Tag className="w-5 h-5 text-green-500" />
+                      </div>
+                      <p className="text-sm font-medium text-gray-900">先优惠券后满减</p>
+                    </button>
+                    <button
+                      onClick={() => updateDiscountConfig({ order: 'promotion_first' })}
+                      className={`flex-1 p-4 rounded-lg border-2 transition-all ${
+                        discountConfig.order === 'promotion_first'
+                          ? 'border-primary-500 bg-primary-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center gap-2 mb-2">
+                        <Tag className="w-5 h-5 text-green-500" />
+                        <ArrowRight className="w-4 h-4 text-gray-400" />
+                        <Ticket className="w-5 h-5 text-accent-500" />
+                      </div>
+                      <p className="text-sm font-medium text-gray-900">先满减后优惠券</p>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <Switch
+                    checked={discountConfig.allowStacking}
+                    onChange={(checked) => updateDiscountConfig({ allowStacking: checked })}
+                    label="允许优惠叠加"
+                  />
+                  <p className="text-sm text-gray-500 pl-14">
+                    开启后，优惠券和满减活动可同时使用
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <Switch
+                    checked={discountConfig.negativeProtection}
+                    onChange={(checked) => updateDiscountConfig({ negativeProtection: checked })}
+                    label="负值兜底保护"
+                  />
+                  <p className="text-sm text-gray-500 pl-14">
+                    开启后，优惠后金额为负时自动置为0
+                  </p>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <Switch
-                  checked={discountConfig.allowStacking}
-                  onChange={(checked) => updateDiscountConfig({ allowStacking: checked })}
-                  label="允许优惠叠加"
-                />
-                <p className="text-sm text-gray-500 pl-14">
-                  开启后，优惠券和满减活动可同时使用
-                </p>
-              </div>
-
-              <div className="space-y-4">
-                <Switch
-                  checked={discountConfig.negativeProtection}
-                  onChange={(checked) => updateDiscountConfig({ negativeProtection: checked })}
-                  label="负值兜底保护"
-                />
-                <p className="text-sm text-gray-500 pl-14">
-                  开启后，优惠后金额为负时自动置为0
-                </p>
+              <div className="lg:col-span-2 space-y-4">
+                <h4 className="font-medium text-gray-900">优惠试算</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      消费金额（元）
+                    </label>
+                    <input
+                      type="number"
+                      value={demoAmount}
+                      onChange={(e) => setDemoAmount(parseFloat(e.target.value) || 0)}
+                      className="input-field"
+                      placeholder="请输入消费金额"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      选择优惠券
+                    </label>
+                    <select
+                      value={demoCoupon || ''}
+                      onChange={(e) => {
+                        setDemoCoupon(e.target.value || null);
+                        const coupon = coupons.find((c) => c.id === e.target.value) || null;
+                        setSelectedCoupon(coupon);
+                      }}
+                      className="input-field"
+                    >
+                      <option value="">不使用优惠券</option>
+                      {coupons.filter(c => c.isActive).map((coupon) => (
+                        <option key={coupon.id} value={coupon.id}>
+                          {coupon.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      异点归还费（元）
+                    </label>
+                    <input
+                      type="number"
+                      value={demoCrossSiteFee || 0}
+                      onChange={(e) => setDemoCrossSiteFee(parseFloat(e.target.value) || 0)}
+                      className="input-field"
+                      placeholder="可选"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="card animate-slide-up animate-stagger-1">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">优惠计算演示</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  模拟消费金额（元）
-                </label>
-                <input
-                  type="number"
-                  value={demoAmount}
-                  onChange={(e) => setDemoAmount(parseInt(e.target.value) || 0)}
-                  className="input-field"
-                />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className={`card animate-slide-up ${
+              discountConfig.order === 'coupon_first' ? 'ring-2 ring-primary-500' : ''
+            }`}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Ticket className="w-5 h-5 text-accent-500" />
+                  <ArrowRight className="w-4 h-4 text-gray-400" />
+                  <Tag className="w-5 h-5 text-green-500" />
+                  先优惠券后满减
+                </h3>
+                {discountConfig.order === 'coupon_first' && (
+                  <span className="text-xs bg-primary-100 text-primary-700 px-2 py-1 rounded-full">
+                    当前启用
+                  </span>
+                )}
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  选择优惠券
-                </label>
-                <select
-                  value={demoCoupon || ''}
-                  onChange={(e) => {
-                    setDemoCoupon(e.target.value || null);
-                    const coupon = coupons.find((c) => c.id === e.target.value) || null;
-                    setSelectedCoupon(coupon);
-                  }}
-                  className="input-field"
-                >
-                  <option value="">不使用优惠券</option>
-                  {coupons.filter(c => c.isActive).map((coupon) => (
-                    <option key={coupon.id} value={coupon.id}>
-                      {coupon.name} ({getCouponTypeLabel(coupon.type)})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <div className="text-sm text-gray-500 mb-2">
-                  当前顺序：{discountConfig.order === 'coupon_first' ? '优惠券 → 满减' : '满减 → 优惠券'}
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">原始金额</span>
-                    <span className="font-medium">{formatCurrency(demoAmount)}</span>
-                  </div>
-                  {demoResult.couponDiscount > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-accent-600">优惠券优惠</span>
-                      <span className="text-accent-600 font-medium">
-                        -{formatCurrency(demoResult.couponDiscount)}
-                      </span>
-                    </div>
-                  )}
-                  {demoResult.promotionDiscount > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-green-600">满减优惠</span>
-                      <span className="text-green-600 font-medium">
-                        -{formatCurrency(demoResult.promotionDiscount)}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex justify-between pt-2 border-t border-gray-200">
-                    <span className="font-semibold text-gray-900">最终金额</span>
-                    <span className="text-xl font-bold text-primary-600">
-                      {formatCurrency(demoResult.finalAmount)}
-                    </span>
-                  </div>
-                  {demoResult.finalAmount === 0 && demoAmount > 0 && (
-                    <div className="text-center text-sm text-green-600 bg-green-50 py-2 rounded-md mt-2">
-                      <Check className="w-4 h-4 inline mr-1" />
-                      负值兜底已触发，金额置为0
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {demoResult.details.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">优惠明细</h4>
+              
+              <div className="space-y-4">
+                <div className="p-4 bg-gray-50 rounded-lg">
                   <div className="space-y-2">
-                    {demoResult.details.map((detail, index) => (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">原始金额</span>
+                      <span className="font-medium">{formatCurrency(demoAmount)}</span>
+                    </div>
+                    {demoCrossSiteFee > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">异点归还费</span>
+                        <span className="font-medium">+{formatCurrency(demoCrossSiteFee)}</span>
+                      </div>
+                    )}
+                    {couponFirstResult.couponDiscount > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-accent-600">优惠券优惠</span>
+                        <span className="text-accent-600 font-medium">
+                          -{formatCurrency(couponFirstResult.couponDiscount)}
+                        </span>
+                      </div>
+                    )}
+                    {couponFirstResult.promotionDiscount > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-green-600">满减优惠</span>
+                        <span className="text-green-600 font-medium">
+                          -{formatCurrency(couponFirstResult.promotionDiscount)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between pt-2 border-t border-gray-200">
+                      <span className="font-semibold text-gray-900">最终金额</span>
+                      <span className="text-xl font-bold text-primary-600">
+                        {formatCurrency(couponFirstResult.finalAmount)}
+                      </span>
+                    </div>
+                    {couponFirstResult.finalAmount === 0 && demoAmount > 0 && (
+                      <div className="text-center text-sm text-green-600 bg-green-50 py-2 rounded-md mt-2">
+                        <Check className="w-4 h-4 inline mr-1" />
+                        负值兜底已触发
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">计算步骤</h4>
+                  <div className="space-y-2">
+                    {couponFirstResult.details.map((detail, index) => (
                       <div
                         key={index}
-                        className="flex items-center justify-between p-2 bg-gray-50 rounded-md"
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded-md"
                       >
-                        <div className="flex items-center gap-2">
-                          {detail.type === 'coupon' && (
-                            <Ticket className="w-4 h-4 text-accent-500" />
-                          )}
-                          {detail.type === 'promotion' && (
-                            <Tag className="w-4 h-4 text-green-500" />
-                          )}
-                          <span className="text-sm text-gray-700">{detail.name}</span>
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
+                            <span className="text-primary-600 font-semibold text-xs">
+                              {index + 1}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {detail.type === 'coupon' && (
+                              <Ticket className="w-4 h-4 text-accent-500" />
+                            )}
+                            {detail.type === 'promotion' && (
+                              <Tag className="w-4 h-4 text-green-500" />
+                            )}
+                            <div>
+                              <span className="text-sm font-medium text-gray-700">{detail.name}</span>
+                              <p className="text-xs text-gray-500">{detail.description}</p>
+                            </div>
+                          </div>
                         </div>
                         <span className="text-sm font-medium text-green-600">
                           -{formatCurrency(detail.amount)}
                         </span>
                       </div>
                     ))}
+                    {couponFirstResult.details.length === 0 && (
+                      <div className="text-center text-sm text-gray-400 py-4">
+                        暂无优惠
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
+              </div>
+            </div>
+
+            <div className={`card animate-slide-up animate-stagger-1 ${
+              discountConfig.order === 'promotion_first' ? 'ring-2 ring-primary-500' : ''
+            }`}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Tag className="w-5 h-5 text-green-500" />
+                  <ArrowRight className="w-4 h-4 text-gray-400" />
+                  <Ticket className="w-5 h-5 text-accent-500" />
+                  先满减后优惠券
+                </h3>
+                {discountConfig.order === 'promotion_first' && (
+                  <span className="text-xs bg-primary-100 text-primary-700 px-2 py-1 rounded-full">
+                    当前启用
+                  </span>
+                )}
+              </div>
+              
+              <div className="space-y-4">
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">原始金额</span>
+                      <span className="font-medium">{formatCurrency(demoAmount)}</span>
+                    </div>
+                    {demoCrossSiteFee > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">异点归还费</span>
+                        <span className="font-medium">+{formatCurrency(demoCrossSiteFee)}</span>
+                      </div>
+                    )}
+                    {promotionFirstResult.promotionDiscount > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-green-600">满减优惠</span>
+                        <span className="text-green-600 font-medium">
+                          -{formatCurrency(promotionFirstResult.promotionDiscount)}
+                        </span>
+                      </div>
+                    )}
+                    {promotionFirstResult.couponDiscount > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-accent-600">优惠券优惠</span>
+                        <span className="text-accent-600 font-medium">
+                          -{formatCurrency(promotionFirstResult.couponDiscount)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between pt-2 border-t border-gray-200">
+                      <span className="font-semibold text-gray-900">最终金额</span>
+                      <span className="text-xl font-bold text-primary-600">
+                        {formatCurrency(promotionFirstResult.finalAmount)}
+                      </span>
+                    </div>
+                    {promotionFirstResult.finalAmount === 0 && demoAmount > 0 && (
+                      <div className="text-center text-sm text-green-600 bg-green-50 py-2 rounded-md mt-2">
+                        <Check className="w-4 h-4 inline mr-1" />
+                        负值兜底已触发
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">计算步骤</h4>
+                  <div className="space-y-2">
+                    {promotionFirstResult.details.map((detail, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded-md"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
+                            <span className="text-primary-600 font-semibold text-xs">
+                              {index + 1}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {detail.type === 'coupon' && (
+                              <Ticket className="w-4 h-4 text-accent-500" />
+                            )}
+                            {detail.type === 'promotion' && (
+                              <Tag className="w-4 h-4 text-green-500" />
+                            )}
+                            <div>
+                              <span className="text-sm font-medium text-gray-700">{detail.name}</span>
+                              <p className="text-xs text-gray-500">{detail.description}</p>
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-sm font-medium text-green-600">
+                          -{formatCurrency(detail.amount)}
+                        </span>
+                      </div>
+                    ))}
+                    {promotionFirstResult.details.length === 0 && (
+                      <div className="text-center text-sm text-gray-400 py-4">
+                        暂无优惠
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card animate-slide-up animate-stagger-2">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">顺序差异对比</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className="table-header">对比项</th>
+                    <th className="table-header">先优惠券后满减</th>
+                    <th className="table-header">先满减后优惠券</th>
+                    <th className="table-header">差异</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="table-cell font-medium">原始金额</td>
+                    <td className="table-cell">{formatCurrency(demoAmount)}</td>
+                    <td className="table-cell">{formatCurrency(demoAmount)}</td>
+                    <td className="table-cell">-</td>
+                  </tr>
+                  <tr>
+                    <td className="table-cell font-medium">优惠券优惠</td>
+                    <td className="table-cell text-accent-600">
+                      -{formatCurrency(couponFirstResult.couponDiscount)}
+                    </td>
+                    <td className="table-cell text-accent-600">
+                      -{formatCurrency(promotionFirstResult.couponDiscount)}
+                    </td>
+                    <td className="table-cell">
+                      {formatCurrency(
+                        couponFirstResult.couponDiscount - promotionFirstResult.couponDiscount
+                      )}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="table-cell font-medium">满减优惠</td>
+                    <td className="table-cell text-green-600">
+                      -{formatCurrency(couponFirstResult.promotionDiscount)}
+                    </td>
+                    <td className="table-cell text-green-600">
+                      -{formatCurrency(promotionFirstResult.promotionDiscount)}
+                    </td>
+                    <td className="table-cell">
+                      {formatCurrency(
+                        couponFirstResult.promotionDiscount - promotionFirstResult.promotionDiscount
+                      )}
+                    </td>
+                  </tr>
+                  <tr className="bg-gray-50">
+                    <td className="table-cell font-bold">最终金额</td>
+                    <td className="table-cell font-bold text-primary-600">
+                      {formatCurrency(couponFirstResult.finalAmount)}
+                    </td>
+                    <td className="table-cell font-bold text-primary-600">
+                      {formatCurrency(promotionFirstResult.finalAmount)}
+                    </td>
+                    <td className={`table-cell font-bold ${
+                      couponFirstResult.finalAmount < promotionFirstResult.finalAmount
+                        ? 'text-green-600'
+                        : couponFirstResult.finalAmount > promotionFirstResult.finalAmount
+                        ? 'text-red-600'
+                        : 'text-gray-500'
+                    }`}>
+                      {couponFirstResult.finalAmount < promotionFirstResult.finalAmount
+                        ? `省 ${formatCurrency(
+                            promotionFirstResult.finalAmount - couponFirstResult.finalAmount
+                          )}`
+                        : couponFirstResult.finalAmount > promotionFirstResult.finalAmount
+                        ? `多花 ${formatCurrency(
+                            couponFirstResult.finalAmount - promotionFirstResult.finalAmount
+                          )}`
+                        : '无差异'}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-700">
+                <strong>建议：</strong>
+                {couponFirstResult.finalAmount < promotionFirstResult.finalAmount
+                  ? '当前消费金额下，「先优惠券后满减」更划算，建议使用此顺序。'
+                  : couponFirstResult.finalAmount > promotionFirstResult.finalAmount
+                  ? '当前消费金额下，「先满减后优惠券」更划算，建议使用此顺序。'
+                  : '两种顺序最终金额相同，可任选其一。'}
+              </p>
             </div>
           </div>
         </div>

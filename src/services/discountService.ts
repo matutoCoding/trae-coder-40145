@@ -7,6 +7,7 @@ import {
   CalculationResult,
   CouponType,
 } from '../types';
+import { formatCurrency } from './transactionService';
 
 export const calculateBaseAmount = (
   durationMinutes: number,
@@ -105,12 +106,32 @@ export const getCouponDescription = (coupon: Coupon): string => {
     case 'fixed':
       return `满${coupon.minAmount}元减${coupon.value}元`;
     case 'percentage':
-      return `${100 - coupon.value}折优惠${coupon.maxDiscount ? `，最高减${coupon.maxDiscount}元` : ''}`;
+      const discountPercent = (100 - coupon.value) / 10;
+      return `${discountPercent}折优惠${coupon.maxDiscount ? `，最高减${coupon.maxDiscount}元` : ''}`;
     case 'free_hours':
       return `免费${coupon.value}小时`;
     default:
       return coupon.name;
   }
+};
+
+export const calculateQuotaDiscount = (
+  baseAmount: number,
+  quotaUsed: number,
+  pricingRule: PricingRule
+): { quotaDiscount: number; effectiveAmount: number } => {
+  if (quotaUsed <= 0 || baseAmount <= 0) {
+    return { quotaDiscount: 0, effectiveAmount: baseAmount };
+  }
+
+  const quotaValue = pricingRule.pricePerHour;
+  const quotaDiscount = Math.min(quotaValue * quotaUsed, baseAmount);
+  const effectiveAmount = Math.max(0, baseAmount - quotaDiscount);
+
+  return {
+    quotaDiscount: Math.round(quotaDiscount * 100) / 100,
+    effectiveAmount: Math.round(effectiveAmount * 100) / 100,
+  };
 };
 
 export const calculateFinalAmount = (
@@ -119,13 +140,29 @@ export const calculateFinalAmount = (
   coupon: Coupon | null,
   promotions: DiscountPromotion[],
   config: DiscountConfig,
-  pricingRule: PricingRule
+  pricingRule: PricingRule,
+  useQuota: number = 0
 ): CalculationResult => {
-  const totalBaseAmount = baseAmount + crossSiteFee;
-  let currentAmount = totalBaseAmount;
+  const { quotaDiscount, effectiveAmount } = calculateQuotaDiscount(
+    baseAmount,
+    useQuota,
+    pricingRule
+  );
+
+  const details: DiscountDetail[] = [];
+
+  if (quotaDiscount > 0) {
+    details.push({
+      type: 'quota',
+      name: '免费额度',
+      amount: quotaDiscount,
+      description: `使用免费额度${useQuota}次，抵扣${formatCurrency(quotaDiscount)}`,
+    });
+  }
+
+  let currentAmount = effectiveAmount + crossSiteFee;
   let couponDiscount = 0;
   let promotionDiscount = 0;
-  const details: DiscountDetail[] = [];
 
   if (config.order === 'coupon_first') {
     if (coupon && coupon.isActive) {
@@ -193,7 +230,7 @@ export const calculateFinalAmount = (
     crossSiteFee: Math.round(crossSiteFee * 100) / 100,
     couponDiscount: Math.round(couponDiscount * 100) / 100,
     promotionDiscount: Math.round(promotionDiscount * 100) / 100,
-    quotaUsed: 0,
+    quotaUsed: useQuota,
     details,
   };
 };

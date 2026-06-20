@@ -11,7 +11,9 @@ export const generateBill = (
   rental: RentalRecord,
   calculationResult: CalculationResult
 ): Bill => {
+  const quotaDiscount = calculationResult.details.find(d => d.type === 'quota')?.amount || 0;
   const totalDiscount = 
+    quotaDiscount +
     calculationResult.couponDiscount + 
     calculationResult.promotionDiscount;
 
@@ -21,11 +23,15 @@ export const generateBill = (
     userId: rental.userId,
     baseAmount: calculationResult.baseAmount,
     crossSiteFee: calculationResult.crossSiteFee,
+    quotaDiscount: Math.round(quotaDiscount * 100) / 100,
+    couponDiscount: calculationResult.couponDiscount,
+    promotionDiscount: calculationResult.promotionDiscount,
     totalDiscount: Math.round(totalDiscount * 100) / 100,
     finalAmount: calculationResult.finalAmount,
     status: calculationResult.finalAmount === 0 ? 'paid' : 'pending',
     createTime: new Date().toISOString(),
     paidTime: calculationResult.finalAmount === 0 ? new Date().toISOString() : undefined,
+    quotaUsed: calculationResult.quotaUsed,
   };
 };
 

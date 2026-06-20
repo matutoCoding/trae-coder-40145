@@ -93,11 +93,15 @@ export interface Bill {
   userId: string;
   baseAmount: number;
   crossSiteFee: number;
+  quotaDiscount: number;
+  couponDiscount: number;
+  promotionDiscount: number;
   totalDiscount: number;
   finalAmount: number;
   status: 'pending' | 'paid' | 'refunded';
   createTime: string;
   paidTime?: string;
+  quotaUsed: number;
 }
 
 export interface Transaction {

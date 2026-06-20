@@ -195,7 +195,12 @@ export const BillManagement = () => {
                     </td>
                     <td className="table-cell">
                       <div className="text-sm">
-                        <div>基础: {formatCurrency(bill.baseAmount)}</div>
+                        <div>基础: {formatCurrency(bill.baseAmount + (bill.quotaDiscount || 0))}</div>
+                        {bill.quotaDiscount && bill.quotaDiscount > 0 && (
+                          <div className="text-primary-600">
+                            额度: -{formatCurrency(bill.quotaDiscount)}
+                          </div>
+                        )}
                         {bill.crossSiteFee > 0 && (
                           <div className="text-orange-600">
                             异点: +{formatCurrency(bill.crossSiteFee)}
@@ -322,6 +327,8 @@ export const BillManagement = () => {
                 baseAmount={selectedBill.baseAmount}
                 crossSiteFee={selectedBill.crossSiteFee}
                 finalAmount={selectedBill.finalAmount}
+                quotaDiscount={selectedBill.quotaDiscount}
+                quotaUsed={selectedBill.quotaUsed}
               />
 
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">

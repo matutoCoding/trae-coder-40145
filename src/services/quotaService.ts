@@ -1,5 +1,58 @@
 import { UserQuota, QuotaUsageRecord } from '../types';
 
+export interface MonthlyQuotaRecord {
+  month: string;
+  monthlyQuota: number;
+  usedQuota: number;
+  cycleStartDate: string;
+  cycleEndDate: string;
+}
+
+export const generateMonthlyHistory = (
+  currentQuota: UserQuota,
+  usageRecords: QuotaUsageRecord[],
+  monthsCount: number = 6
+): MonthlyQuotaRecord[] => {
+  const history: MonthlyQuotaRecord[] = [];
+  const today = new Date();
+
+  for (let i = 0; i < monthsCount; i++) {
+    const targetDate = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const monthStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+    const monthStart = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
+    const monthEnd = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0);
+
+    const monthRecords = usageRecords.filter(record => {
+      const recordDate = new Date(record.usageTime);
+      return recordDate >= monthStart && recordDate <= monthEnd;
+    });
+
+    const usedQuota = monthRecords.reduce((sum, record) => sum + record.quotaUsed, 0);
+
+    history.push({
+      month: monthStr,
+      monthlyQuota: currentQuota.monthlyQuota,
+      usedQuota,
+      cycleStartDate: monthStart.toISOString().split('T')[0],
+      cycleEndDate: monthEnd.toISOString().split('T')[0],
+    });
+  }
+
+  return history;
+};
+
+export const formatMonthDisplay = (month: string): string => {
+  const [year, m] = month.split('-');
+  return `${year}年${parseInt(m)}月`;
+};
+
+export const getDaysUntilReset = (): number => {
+  const today = new Date();
+  const nextReset = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const diffTime = nextReset.getTime() - today.getTime();
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+};
+
 export const resetMonthlyQuota = (
   quota: UserQuota,
   currentDate: Date = new Date()

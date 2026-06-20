@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Gift,
   Calendar,
@@ -10,7 +10,19 @@ import {
   AlertTriangle,
   Plus,
   Minus,
+  BarChart3,
+  RotateCcw,
 } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from 'recharts';
 import { useStore } from '../store/useStore';
 import { Modal } from '../components/Modal';
 import {
@@ -19,19 +31,37 @@ import {
   calculateDaysRemainingInCycle,
   formatQuotaPeriod,
   calculateQuotaSavings,
+  checkAndResetQuotaIfNeeded,
+  generateMonthlyHistory,
+  formatMonthDisplay,
+  getNextResetDate,
+  getDaysUntilReset,
+  MonthlyQuotaRecord,
 } from '../services/quotaService';
 import { formatCurrency, formatDateTime, formatDate } from '../services/transactionService';
 
 export const QuotaManagement = () => {
-  const { userQuota, quotaUsageRecords, updateMonthlyQuota, resetQuotaManually, pricingRule } = useStore();
+  const { userQuota, quotaUsageRecords, updateMonthlyQuota, resetQuotaManually, pricingRule, user } = useStore();
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [newMonthlyQuota, setNewMonthlyQuota] = useState(userQuota.monthlyQuota);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
-  const remainingQuota = getRemainingQuota(userQuota);
-  const usagePercentage = getQuotaUsagePercentage(userQuota);
-  const daysRemaining = calculateDaysRemainingInCycle(userQuota);
+  const { quota: currentQuota, wasReset } = checkAndResetQuotaIfNeeded(userQuota);
+
+  const remainingQuota = getRemainingQuota(currentQuota);
+  const usagePercentage = getQuotaUsagePercentage(currentQuota);
+  const daysRemaining = calculateDaysRemainingInCycle(currentQuota);
   const totalSavings = calculateQuotaSavings(quotaUsageRecords, pricingRule.pricePerHour);
+  const nextResetDate = getNextResetDate();
+  const daysUntilReset = getDaysUntilReset();
+
+  const monthlyHistory = useMemo(() => {
+    return generateMonthlyHistory(currentQuota, quotaUsageRecords, 6).reverse();
+  }, [currentQuota, quotaUsageRecords]);
+
+  const sortedRecords = [...quotaUsageRecords].sort(
+    (a, b) => new Date(b.usageTime).getTime() - new Date(a.usageTime).getTime()
+  );
 
   const handleSaveSettings = () => {
     updateMonthlyQuota(newMonthlyQuota);
@@ -50,25 +80,41 @@ export const QuotaManagement = () => {
     return 'bg-green-500';
   };
 
-  const sortedRecords = [...quotaUsageRecords].sort(
-    (a, b) => new Date(b.usageTime).getTime() - new Date(a.usageTime).getTime()
-  );
+  const getBarColor = (item: MonthlyQuotaRecord) => {
+    const percentage = item.monthlyQuota > 0 ? (item.usedQuota / item.monthlyQuota) * 100 : 0;
+    if (percentage >= 100) return '#EF4444';
+    if (percentage >= 80) return '#F97316';
+    if (percentage >= 50) return '#EAB308';
+    return '#22C55E';
+  };
 
   return (
     <div className="space-y-6">
+      {wasReset && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <RotateCcw className="w-5 h-5 text-green-500 animate-spin" style={{ animationDuration: '2s' }} />
+            <div>
+              <p className="font-medium text-green-800">额度已自动重置</p>
+              <p className="text-sm text-green-600">新的一个月开始了，您的免费额度已重置为 {currentQuota.monthlyQuota} 次</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 card animate-slide-up">
           <div className="flex items-start justify-between mb-6">
             <div>
               <h3 className="text-lg font-semibold text-gray-900">本月免费额度</h3>
               <p className="text-sm text-gray-500 mt-1">
-                {formatQuotaPeriod(userQuota)}
+                {formatQuotaPeriod(currentQuota)}
               </p>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
-                  setNewMonthlyQuota(userQuota.monthlyQuota);
+                  setNewMonthlyQuota(currentQuota.monthlyQuota);
                   setSettingsModalOpen(true);
                 }}
                 className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
@@ -93,7 +139,7 @@ export const QuotaManagement = () => {
                   <span className="text-3xl font-bold text-primary-600">
                     {remainingQuota}
                   </span>
-                  <span className="text-sm text-gray-500">/{userQuota.monthlyQuota}</span>
+                  <span className="text-sm text-gray-500">/{currentQuota.monthlyQuota}</span>
                 </div>
               </div>
               <svg
@@ -127,7 +173,7 @@ export const QuotaManagement = () => {
                 <div className="flex justify-between text-sm mb-1">
                   <span className="text-gray-500">已使用</span>
                   <span className="font-medium">
-                    {userQuota.usedQuota} 次 ({usagePercentage}%)
+                    {currentQuota.usedQuota} 次 ({usagePercentage}%)
                   </span>
                 </div>
                 <div className="progress-bar">
@@ -180,6 +226,48 @@ export const QuotaManagement = () => {
 
         <div className="space-y-6">
           <div className="card animate-slide-up animate-stagger-1">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">周期信息</h3>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Calendar className="w-5 h-5 text-primary-500" />
+                  <div>
+                    <p className="text-sm text-gray-500">下次重置日</p>
+                    <p className="font-medium text-gray-900">{formatDate(nextResetDate)}</p>
+                  </div>
+                </div>
+                <span className="bg-primary-100 text-primary-700 px-3 py-1 rounded-full text-sm font-medium">
+                  {daysUntilReset}天后
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Clock className="w-5 h-5 text-orange-500" />
+                  <div>
+                    <p className="text-sm text-gray-500">本月已使用</p>
+                    <p className="font-medium text-gray-900">{currentQuota.usedQuota} 次</p>
+                  </div>
+                </div>
+                <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-sm font-medium">
+                  {usagePercentage}%
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Gift className="w-5 h-5 text-green-500" />
+                  <div>
+                    <p className="text-sm text-gray-500">每月额度</p>
+                    <p className="font-medium text-gray-900">{currentQuota.monthlyQuota} 次</p>
+                  </div>
+                </div>
+                <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium">
+                  固定发放
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card animate-slide-up animate-stagger-2">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">额度规则</h3>
             <div className="space-y-3 text-sm">
               <div className="flex items-start gap-3">
@@ -189,7 +277,7 @@ export const QuotaManagement = () => {
                 <div>
                   <p className="font-medium text-gray-700">每月发放</p>
                   <p className="text-gray-500">
-                    每月1日自动发放 {userQuota.monthlyQuota} 次免费借伞额度
+                    每月1日自动发放 {currentQuota.monthlyQuota} 次免费借伞额度
                   </p>
                 </div>
               </div>
@@ -209,7 +297,7 @@ export const QuotaManagement = () => {
                 <div>
                   <p className="font-medium text-gray-700">使用规则</p>
                   <p className="text-gray-500">
-                    每次借伞可使用1次免费额度，抵扣基础费用
+                    每次借伞可使用1次免费额度，抵扣 {formatCurrency(pricingRule.pricePerHour)}
                   </p>
                 </div>
               </div>
@@ -226,25 +314,73 @@ export const QuotaManagement = () => {
               </div>
             </div>
           </div>
-
-          <div className="card animate-slide-up animate-stagger-2">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">快捷充值</h3>
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              {[10, 20, 50, 100, 200, 500].map((amount) => (
-                <button
-                  key={amount}
-                  className="py-2 border border-gray-200 rounded-lg text-sm font-medium hover:border-primary-500 hover:text-primary-600 transition-colors"
-                >
-                  ¥{amount}
-                </button>
-              ))}
-            </div>
-            <button className="btn-primary w-full">立即充值</button>
-          </div>
         </div>
       </div>
 
       <div className="card animate-slide-up animate-stagger-3">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-primary-500" />
+            近6个月额度使用情况
+          </h3>
+        </div>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={monthlyHistory} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 12 }}
+                stroke="#6B7280"
+                tickFormatter={(value) => formatMonthDisplay(value).replace('年', '/').replace('月', '')}
+              />
+              <YAxis tick={{ fontSize: 12 }} stroke="#6B7280" />
+              <Tooltip
+                formatter={(value: number, name: string) => [
+                  `${value} 次`,
+                  name === 'usedQuota' ? '已使用' : '每月额度'
+                ]}
+                labelFormatter={(label) => formatMonthDisplay(label)}
+                contentStyle={{
+                  backgroundColor: '#FFF',
+                  border: '1px solid #E5E7EB',
+                  borderRadius: '8px',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                }}
+              />
+              <Bar
+                dataKey="usedQuota"
+                name="usedQuota"
+                radius={[4, 4, 0, 0]}
+                animationDuration={1000}
+              >
+                {monthlyHistory.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={getBarColor(entry)} />
+                ))}
+              </Bar>
+              <Bar
+                dataKey="monthlyQuota"
+                name="monthlyQuota"
+                fill="#E5E7EB"
+                radius={[4, 4, 0, 0]}
+                animationDuration={1000}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="flex justify-center gap-6 mt-4">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded bg-primary-500" />
+            <span className="text-sm text-gray-600">已使用</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded bg-gray-300" />
+            <span className="text-sm text-gray-600">每月额度</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="card animate-slide-up animate-stagger-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <History className="w-5 h-5 text-primary-500" />
@@ -255,38 +391,51 @@ export const QuotaManagement = () => {
           </span>
         </div>
 
-        <div className="space-y-3">
-          {sortedRecords.map((record, index) => (
-            <div
-              key={record.id}
-              className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors animate-fade-in"
-              style={{ animationDelay: `${index * 50}ms` }}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                  <Minus className="w-5 h-5 text-green-600" />
-                </div>
-                <div>
-                  <p className="font-medium text-gray-900">{record.description}</p>
-                  <p className="text-sm text-gray-500">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr>
+                <th className="table-header">使用时间</th>
+                <th className="table-header">使用次数</th>
+                <th className="table-header">描述</th>
+                <th className="table-header">节省金额</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedRecords.map((record, index) => (
+                <tr
+                  key={record.id}
+                  className="hover:bg-gray-50 transition-colors animate-fade-in"
+                  style={{ animationDelay: `${index * 30}ms` }}
+                >
+                  <td className="table-cell text-sm text-gray-600">
                     {formatDateTime(record.usageTime)}
-                  </p>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="font-medium text-green-600">-1 次</p>
-                <p className="text-xs text-gray-500">
-                  节省 {formatCurrency(pricingRule.pricePerHour)}
-                </p>
-              </div>
-            </div>
-          ))}
-          {sortedRecords.length === 0 && (
-            <div className="text-center py-8 text-gray-400">
-              <Clock className="w-12 h-12 mx-auto mb-2 opacity-50" />
-              <p>暂无额度使用记录</p>
-            </div>
-          )}
+                  </td>
+                  <td className="table-cell">
+                    <span className="inline-flex items-center justify-center w-8 h-8 bg-orange-100 text-orange-700 rounded-full font-semibold text-sm">
+                      -{record.quotaUsed}
+                    </span>
+                  </td>
+                  <td className="table-cell text-sm text-gray-700">
+                    {record.description}
+                  </td>
+                  <td className="table-cell text-sm font-medium text-green-600">
+                    {formatCurrency(pricingRule.pricePerHour * record.quotaUsed)}
+                  </td>
+                </tr>
+              ))}
+              {sortedRecords.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="table-cell text-center py-8">
+                    <div className="flex flex-col items-center gap-2 text-gray-400">
+                      <Clock className="w-8 h-8" />
+                      <p>暂无额度使用记录</p>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -356,7 +505,7 @@ export const QuotaManagement = () => {
             <div>
               <p className="font-medium text-orange-900">确认要重置本月额度吗？</p>
               <p className="text-sm text-orange-700">
-                重置后，已使用的 {userQuota.usedQuota} 次额度将恢复为 {userQuota.monthlyQuota} 次。
+                重置后，已使用的 {currentQuota.usedQuota} 次额度将恢复为 {currentQuota.monthlyQuota} 次。
                 此操作不可撤销。
               </p>
             </div>
@@ -366,13 +515,13 @@ export const QuotaManagement = () => {
             <div className="p-3 bg-gray-50 rounded-lg">
               <p className="text-gray-500">重置前</p>
               <p className="text-lg font-semibold text-gray-900">
-                {userQuota.usedQuota} / {userQuota.monthlyQuota}
+                {currentQuota.usedQuota} / {currentQuota.monthlyQuota}
               </p>
             </div>
             <div className="p-3 bg-green-50 rounded-lg">
               <p className="text-green-600">重置后</p>
               <p className="text-lg font-semibold text-green-700">
-                0 / {userQuota.monthlyQuota}
+                0 / {currentQuota.monthlyQuota}
               </p>
             </div>
           </div>
